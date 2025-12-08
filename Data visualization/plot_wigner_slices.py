@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 """
-Load a saved Wigner 3D dataset (npz), show the heatmap, and plot a single slice
-along a quadrature axis with phase phi (phi=0 -> x slice, phi=pi/2 -> p slice).
+Visualize a saved Wigner reconstruction and extract a 1D quadrature slice.
 
-Usage: python plot_wigner_slices.py
-Configure TARGET_FILE below.
+What it shows
+-------------
+- Left: 2D heatmap of W(x, p) loaded from the ``npz`` file produced by
+  ``run_tomography.py``.
+- Right: A single quadrature slice at phase ``SLICE_PHASE`` (0 -> x axis,
+  ``np.pi/2`` -> p axis) interpolated via bilinear sampling.
+
+How to use
+----------
+1) Point ``TARGET_FILE`` to the desired Wigner ``.npz`` file.
+2) Adjust ``SLICE_PHASE`` and ``N_SLICE_POINTS`` if needed.
+3) Run ``python plot_wigner_slices.py`` to display the plots.
 """
 
 from pathlib import Path

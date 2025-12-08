@@ -1,8 +1,21 @@
 """
 Lvovsky iterative maximum-likelihood reconstruction for homodyne tomography.
-This complements the Cholesky-based optimizer in mle_core with an operator
-update scheme described in Lvovsky (2004), suitable for the same quadrature
-input format {phase: samples}. An optional binning path accelerates the update.
+
+This module reconstructs a density matrix from homodyne quadrature samples
+collected at multiple phases. It implements the operator-update scheme from
+Lvovsky (2004), which iteratively refines the state until the forward model
+matches the measured quadrature statistics.
+
+Inputs expected by this module
+------------------------------
+- ``quadratures``: mapping phase (radians) -> 1D numpy array of samples.
+- ``cutoff``: Fock-space cutoff dimension (matrix will be ``cutoff x cutoff``).
+- Optional histogram binning (``nbins``) for speed on large datasets.
+
+Outputs
+-------
+- ``rho_hat``: estimated density matrix.
+- ``info``: convergence metadata (iterations, deltas, probability extrema).
 """
 
 from __future__ import annotations
@@ -14,7 +27,7 @@ from scipy.special import eval_hermite, gammaln
 
 
 def quadrature_psi(q: np.ndarray, n: int) -> np.ndarray:
-    """Harmonic oscillator wavefunction psi_n(q) for X quadrature."""
+    """Harmonic-oscillator wavefunction psi_n(q) for the X quadrature."""
     norm = np.exp(-0.5 * q * q) / (np.pi ** 0.25 * np.sqrt(2.0 ** n * np.exp(gammaln(n + 1))))
     return norm * eval_hermite(n, q)
 
@@ -25,15 +38,19 @@ def _build_wavefunction_matrix(
     bin_pad_frac: float = 0.05,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Assemble the quadrature wavefunction matrix W where each row corresponds to
-    a measurement (or bin center) |x, phi> expressed in the Fock basis up to `cutoff`.
+    Assemble the quadrature wavefunction matrix ``W`` for all measurements.
 
-    If `nbins` is None, use raw samples. If set, histogram each phase to speed up
-    iterations and attach counts as weights.
+    Each row of ``W`` corresponds to |x, phi> expressed in the Fock basis up to
+    ``cutoff``. If ``nbins`` is provided, raw samples are histogrammed per phase
+    and each bin center becomes a row weighted by its counts; this reduces
+    iterations for large datasets.
 
-    Returns:
-        W: shape (N, cutoff) complex matrix of wavefunctions.
-        weights: shape (N,) weights (counts) for each row; ones for unbinned data.
+    Returns
+    -------
+    W:
+        Complex matrix of shape (N, cutoff), one row per sample/bin.
+    weights:
+        1D array of counts per row (all ones when unbinned).
     """
     n = np.arange(cutoff)
 
@@ -48,7 +65,7 @@ def _build_wavefunction_matrix(
         weights = np.ones(W.shape[0], dtype=float)
         return W, weights
 
-    # Binned path
+    # Binned path: histogram per phase and only keep non-empty bins.
     all_vals = np.concatenate(list(quadratures.values()))
     vmin, vmax = float(np.min(all_vals)), float(np.max(all_vals))
     pad = bin_pad_frac * (vmax - vmin + 1e-12)
@@ -84,17 +101,27 @@ def _lvovsky_step(
     min_prob: float = 1e-12,
 ) -> Tuple[np.ndarray, float, float, float]:
     """
-    One iteration of the Lvovsky update: rho_{k+1} = R rho R / Tr(R rho R).
+    One Lvovsky iteration: ``rho_{k+1} = R rho R / Tr(R rho R)``.
 
-    Args:
-        rho: Current density matrix (cutoff x cutoff).
-        W: Wavefunction matrix from `_build_wavefunction_matrix`.
-        min_prob: Floor to avoid division by zero.
+    Args
+    ----
+    rho:
+        Current density matrix (``cutoff x cutoff``).
+    W:
+        Wavefunction matrix from ``_build_wavefunction_matrix``.
+    weights:
+        Optional per-row counts (used when histogram binning is enabled).
+    min_prob:
+        Numerical floor to avoid division by zero.
 
-    Returns:
-        rho_next: Updated density matrix.
-        delta: Frobenius norm difference to previous rho.
-        p_min, p_max: Extremal probabilities used in the update.
+    Returns
+    -------
+    rho_next:
+        Updated density matrix.
+    delta:
+        Frobenius-norm difference to previous ``rho`` (convergence metric).
+    p_min, p_max:
+        Extremal probabilities encountered in this step.
     """
     probs = np.real(np.sum((W @ rho) * np.conj(W), axis=1))
     probs = np.clip(probs, min_prob, None)
@@ -130,17 +157,27 @@ def run_lvovsky_mle(
     """
     Run Lvovsky iterative MLE on homodyne quadrature samples.
 
-    Args:
-        quadratures: Dict mapping phase (radians) to 1D array of quadrature samples.
-        cutoff: Fock cutoff dimension for the reconstruction.
-        max_iter: Maximum number of iterations.
-        tol: Convergence tolerance on Frobenius norm between successive states.
-        min_prob: Floor for measurement probabilities in the update.
-        nbins: If set, histogram samples per phase to this many bins for speed.
+    Args
+    ----
+    quadratures:
+        Mapping phase (radians) -> 1D array of quadrature samples.
+    cutoff:
+        Fock cutoff dimension for the reconstruction (rho is ``cutoff x cutoff``).
+    max_iter:
+        Maximum number of iterations before giving up.
+    tol:
+        Convergence tolerance on Frobenius norm between successive states.
+    min_prob:
+        Probability floor to avoid singular updates.
+    nbins:
+        Histogram bins per phase. Set to None to use raw samples.
 
-    Returns:
-        rho_hat: Estimated density matrix (cutoff x cutoff).
-        info: Dict with convergence metadata (iterations, converged, deltas, p_min/max).
+    Returns
+    -------
+    rho_hat:
+        Estimated density matrix (``cutoff x cutoff``).
+    info:
+        Dict with convergence metadata (iterations, converged, deltas, p_min/max).
     """
     W, weights = _build_wavefunction_matrix(quadratures, cutoff, nbins=nbins)
     rho = np.eye(cutoff, dtype=np.complex128) / float(cutoff)

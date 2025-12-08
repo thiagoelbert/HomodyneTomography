@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """
 Collect processed pulse-area files (CH1/CH3) into a pandas DataFrame.
-Metadata (phase, shutter, base name) comes from Acq_list.dat.
-Values are the processed pulse areas stored in the *_NN.dat files (one column).
+
+Inputs expected on disk
+-----------------------
+- ``Acq_list.dat`` describing each acquisition with phase and shutter info.
+- One processed file per pulse with pattern ``<base_prefix>CH{1|3}-<shutter>_<NN>.dat``.
+
+What this module returns
+------------------------
+A tidy DataFrame where each row corresponds to one processed file and includes:
+``file, channel, shutter, pulse, phase_hd, values, mean, var, count``.
+Use ``collect`` as the public entry point.
 """
 
 from pathlib import Path
-from typing import List, Iterable, Optional
+from typing import Iterable, Optional
 import pandas as pd
 import numpy as np
 
-DEFAULT_FOLDER = "thiagoTest"  # set your default data folder here
-DEFAULT_SAVE_JSON = None       # e.g., "processed.json"
-DEFAULT_SAVE_CSV = None        # e.g., "processed.csv"
-
 
 def read_numeric_file(path: Path) -> np.ndarray:
-    """
-    Fast numeric reader using numpy; returns 1D float array.
-    """
+    """Fast numeric reader using numpy; returns a 1D float array."""
     try:
         arr = np.fromfile(path, dtype=float, sep=" ")
     except ValueError:
@@ -29,10 +32,7 @@ def read_numeric_file(path: Path) -> np.ndarray:
 
 
 def load_acq_list(acq_list_path: Path) -> pd.DataFrame:
-    """
-    Parse Acq_list.dat into a DataFrame with columns:
-    base_prefix, shutter, phase_hd, file_root.
-    """
+    """Parse ``Acq_list.dat`` into ``base_prefix, shutter, phase_hd, file_root`` columns."""
     rows = []
     lines = [ln for ln in acq_list_path.read_text().splitlines() if ln.strip()]
     if len(lines) < 2:
@@ -122,22 +122,3 @@ def collect(
                     }
                 )
     return pd.DataFrame(records)
-
-
-def main():
-    folder = Path(DEFAULT_FOLDER)
-    df = collect(folder)
-
-    print(f"Collected {len(df)} files from {folder}")
-    print(df[["channel", "shutter", "pulse", "phase_hd"]].value_counts().rename("files").reset_index().head())
-
-    if DEFAULT_SAVE_JSON:
-        Path(DEFAULT_SAVE_JSON).write_text(df.to_json(orient="records", indent=2))
-        print(f"Saved JSON to {DEFAULT_SAVE_JSON}")
-    if DEFAULT_SAVE_CSV:
-        df.to_csv(DEFAULT_SAVE_CSV, index=False)
-        print(f"Saved CSV to {DEFAULT_SAVE_CSV}")
-
-
-if __name__ == "__main__":
-    main()

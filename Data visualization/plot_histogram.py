@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Plot a histogram of a single processed file (e.g., CH3-open_01.dat).
-Reads all numeric values in the file and displays a simple histogram.
+Quick-look histogram for a single processed pulse file (e.g., CH3-open_01.dat).
+
+Edit ``file_path`` below to point at any calibrated/processed ``*.dat`` file.
+The script reads all numeric values (robust to commas/spaces) and displays a
+simple histogram so you can spot outliers or check calibration visually.
 """
 
 from pathlib import Path

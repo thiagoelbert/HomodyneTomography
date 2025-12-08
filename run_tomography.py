@@ -34,17 +34,23 @@ from Reconstruction_core.collect_processed import collect
 from Reconstruction_core.mle_lvovsky import run_lvovsky_mle
 
 # Reconstruction defaults (tune here)
-DATA_FOLDER = Path(r"C:\Users\Thiago Guimarães\Documents\Repositorios\Marco-Setup\Data03121")  # raw data; calibrated folder is created automatically
+DATA_FOLDER = Path(r"C:\Users\Thiago Guimarães\Documents\Repositorios\Marco-Setup\Data03121_calib")
+# Channel, pulse and shutters to reconstruct
 CHANNEL = "CH3"
 PULSE = 1
 SHUTTERS = ("open", "closed")
+# Fock cutoff dimension for density matrix (larger is slower)
 CUTOFF = 20
+# Histogram bins per phase for the Lvovsky MLE (None to use raw samples)
 NBINS_LVOVSKY = 120
+# Convergence variables for Lvovsky reconstruction (tol)
 TOL = 1e-7
-MAX_ITER = 2000
+MAX_ITER = 5000
 MIN_PROB = 1e-9
-WIGNER_POINTS = 60
+# Wigner grid resolution (points per axis) and half-width range
+WIGNER_POINTS = 500
 WIGNER_XMAX = 5.0
+#Output directory
 OUTPUT_DIR = Path("TomoOutput")
 
 
@@ -100,12 +106,12 @@ def reconstruct_wigner(quadratures: Dict[float, np.ndarray], title: str, save_pa
             W=W,  # type: ignore
             rho=rho_hat,
             mle_status=mle_status,
-            nbins_lvovsky=NBINS_LVOVSKY,
+            nbins_lvovsky=NBINS_LVOVSKY, # type: ignore
             cutoff=CUTOFF,
             tol=TOL,
             max_iter=MAX_ITER,
         )
-        # Also write density matrix as a text file for quick inspection (separate real/imag blocks)
+        # Also write density matrix as a text file
         rho_txt = save_path.with_suffix(".rho.txt")
         rho_real = np.real(rho_hat)
         rho_imag = np.imag(rho_hat)

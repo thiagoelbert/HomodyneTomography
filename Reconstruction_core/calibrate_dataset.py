@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Calibrate homodyne data by using pulse 4 as vacuum:
-- For each acquisition group (base_prefix + channel + shutter), compute mean/std of pulse 4.
-- Subtract the mean to center at zero and scale so std -> 1/sqrt(2).
-- Write calibrated pulse files to a sibling folder with suffix "_calib".
-Acq_list.dat is copied unchanged.
+Calibrate processed homodyne pulse files by using pulse 4 as vacuum.
+
+Pipeline in plain words
+-----------------------
+1) For each acquisition group (``base_prefix`` + channel + shutter), read the
+   processed vacuum pulse (``*_04.dat``) and measure its mean and std.
+2) Shift every pulse so the vacuum mean is 0 and scale it so the vacuum std is
+   ``1/sqrt(2)`` (vacuum quadrature variance).
+3) Write all calibrated pulses to a sibling folder with suffix ``_calib`` and
+   copy ``Acq_list.dat`` unchanged for reproducibility.
 """
 
 from pathlib import Path
@@ -16,7 +21,6 @@ from Reconstruction_core.collect_processed import load_acq_list, read_numeric_fi
 
 TARGET_STD = 1 / np.sqrt(2)  # vacuum quadrature std
 CALIBRATION_PULSE = 4
-DEFAULT_INPUT = Path("Data03121")
 
 
 def write_numeric_file(path: Path, values: np.ndarray):
@@ -28,7 +32,8 @@ def write_numeric_file(path: Path, values: np.ndarray):
 
 def find_calibration(meta_df, folder: Path) -> Dict[Tuple[str, str, str], Tuple[float, float]]:
     """
-    Return mapping (base_prefix, channel, shutter) -> (mean, std) for pulse 4.
+    Return mapping ``(base_prefix, channel, shutter) -> (mean, std)`` for pulse 4.
+    If a channel lacks a valid vacuum file or has zero variance, it is skipped.
     """
     calib = {}
     for _, meta in meta_df.iterrows():
@@ -83,11 +88,3 @@ def calibrate_folder(input_folder: Path) -> Path:
                 write_numeric_file(out_path, calibrated)
     print(f"Calibrated data written to {output_folder}")
     return output_folder
-
-
-def main():
-    calibrate_folder(DEFAULT_INPUT)
-
-
-if __name__ == "__main__":
-    main()
