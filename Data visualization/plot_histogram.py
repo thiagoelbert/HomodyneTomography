@@ -27,7 +27,7 @@ def read_numeric_file(path: Path):
 
 def main():
     # Set your target file here
-    file_path = Path(r"Data03121_calib\Acq_251203_152035CH3-closed_01.dat")
+    file_path = Path(r"\Data03121_calib\Acq_251203_152035CH3-closed_01.dat")
 
     vals = read_numeric_file(file_path)
     plt.figure(figsize=(6, 4))

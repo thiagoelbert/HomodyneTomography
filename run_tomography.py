@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-end real-data pipeline (IDE-friendly).
+End-to-end real-data pipeline.
 
 What you need on disk
 ---------------------

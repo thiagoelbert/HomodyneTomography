@@ -23,9 +23,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-TARGET_FILE = Path("Wigner3D") / "wigner_CH3_closed_pulse1.npz"
+TARGET_FILE = Path(r"\TomoOutput\wigner_CH3_open_pulse1.npz")
 # Target slice phase (radians). 0 -> x axis, np.pi/2 -> p axis.
-SLICE_PHASE = 0.0
+SLICE_PHASE = np.pi / 2
 # Number of points along the slice
 N_SLICE_POINTS = 400
 
@@ -64,8 +64,13 @@ def bilinear_interpolate(xvec: np.ndarray, pvec: np.ndarray, W: np.ndarray, xq: 
     return w00 * v00 + w10 * v10 + w01 * v01 + w11 * v11
 
 
-def make_slice(xvec: np.ndarray, pvec: np.ndarray, W: np.ndarray, phi: float) -> Tuple[np.ndarray, np.ndarray]:
-    """Return (q, W_slice) along quadrature axis at angle phi."""
+def make_slice(
+    xvec: np.ndarray, pvec: np.ndarray, W: np.ndarray, phi: float
+) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float], Tuple[float, float]]:
+    """
+    Return (q, W_slice) along quadrature axis at angle phi, plus line endpoints
+    (x_line, p_line) suitable for overlay on the heatmap.
+    """
     c, s = np.cos(phi), np.sin(phi)
     bounds = []
     if abs(c) > 1e-9:
@@ -77,7 +82,9 @@ def make_slice(xvec: np.ndarray, pvec: np.ndarray, W: np.ndarray, phi: float) ->
     xq = q * c
     pq = q * s
     Wq = bilinear_interpolate(xvec, pvec, W, xq, pq)
-    return q, Wq
+    x_line = (-q_lim * c, q_lim * c)
+    p_line = (-q_lim * s, q_lim * s)
+    return q, Wq, x_line, p_line
 
 
 def main():
@@ -88,7 +95,7 @@ def main():
 
     xvec, pvec, W = load_npz(target)
 
-    q, Wq = make_slice(xvec, pvec, W, SLICE_PHASE)
+    q, Wq, x_line, p_line = make_slice(xvec, pvec, W, SLICE_PHASE)
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
 
@@ -99,6 +106,9 @@ def main():
         cmap="viridis",
         aspect="equal",  # keep same scale on x and p
     )
+    # Overlay the slice direction on the heatmap for visual reference
+    ax0.plot(x_line, p_line, color="red", linestyle="--", linewidth=1.5, label="slice")
+    ax0.legend(loc="upper right")
     ax0.set_title("Wigner W(x, p)")
     ax0.set_xlabel("x")
     ax0.set_ylabel("p")
