@@ -15,7 +15,9 @@ Source code for quantum state tomography from homodyne measurements.
 ## 2) Get this repository
 
 - If you already have the folder, skip.
-- Otherwise, download/clone into a local directory. You should see files like `run_tomography.py`, the `Reconstruction_core` folder, and `Data visualization`.
+- Otherwise, download the source from GitHub: https://github.com/thiagoelbert/HomodyneTomography (Code → Download ZIP) and unzip it.
+  
+You should see files like `run_tomography.py`, the `Reconstruction_core` folder, and `Data visualization`.
 
 ## 3) Create a virtual environment (recommended)
 
