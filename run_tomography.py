@@ -34,7 +34,7 @@ from Reconstruction_core.collect_processed import collect
 from Reconstruction_core.mle_lvovsky import run_lvovsky_mle
 
 # Reconstruction defaults (tune here)
-DATA_FOLDER = Path(r"C:\Users\Thiago Guimarães\Documents\Repositorios\Marco-Setup\Data03121_calib")
+DATA_FOLDER = Path(r"Data03121")
 # Channel, pulse and shutters to reconstruct
 CHANNEL = "CH3"
 PULSE = 1
