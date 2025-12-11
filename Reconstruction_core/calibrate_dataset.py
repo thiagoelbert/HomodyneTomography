@@ -4,8 +4,9 @@ Calibrate processed homodyne pulse files by using pulse 4 as vacuum.
 
 Pipeline in plain words
 -----------------------
-1) For each acquisition group (``base_prefix`` + channel + shutter), read the
-   processed vacuum pulse (``*_04.dat``) and measure its mean and std.
+1) For closed shutters, read the processed pulse 4 (``*_04.dat``) and measure
+   its mean and std; for open shutters, reuse the most recent closed pulse 4
+   (open pulse 4 is not vacuum).
 2) Shift every pulse so the vacuum mean is 0 and scale it so the vacuum std is
    ``1/sqrt(2)`` (vacuum quadrature variance).
 3) Write all calibrated pulses to a sibling folder with suffix ``_calib`` and
@@ -23,6 +24,23 @@ TARGET_STD = 1 / np.sqrt(2)  # vacuum quadrature std
 CALIBRATION_PULSE = 4
 
 
+def _load_calibration_pulse(folder: Path, base_prefix: str, channel: str, shutter: str):
+    """
+    Return (mean, std) for the calibration pulse, or None if the file is missing
+    or has zero variance.
+    """
+    pattern = f"{base_prefix}{channel}-{shutter}_{CALIBRATION_PULSE:02d}.dat"
+    path = folder / pattern
+    if not path.exists():
+        return None
+    vals = np.array(read_numeric_file(path))
+    std = float(np.std(vals))
+    if std == 0.0:
+        return None
+    mean = float(np.mean(vals))
+    return mean, std
+
+
 def write_numeric_file(path: Path, values: np.ndarray):
     """Write one value per line using scientific notation."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -32,27 +50,28 @@ def write_numeric_file(path: Path, values: np.ndarray):
 
 def find_calibration(meta_df, folder: Path) -> Dict[Tuple[str, str, str], Tuple[float, float]]:
     """
-    Return mapping ``(base_prefix, channel, shutter) -> (mean, std)`` for pulse 4.
-    If a channel lacks a valid vacuum file or has zero variance, it is skipped.
+    Return mapping ``(base_prefix, channel, shutter) -> (mean, std)``.
+
+    Calibration rules:
+    - Closed shutter entries use their own pulse-4 statistics.
+    - Open shutter entries reuse the most recent closed pulse-4 statistics for
+      the same channel encountered earlier in ``Acq_list`` (open pulse 4 is not
+      vacuum).
     """
-    calib = {}
+    calib: Dict[Tuple[str, str, str], Tuple[float, float]] = {}
+    last_closed: Dict[str, Tuple[float, float]] = {}
     for _, meta in meta_df.iterrows():
         base_prefix = meta.base_prefix
         shutter = meta.shutter
-        phase = meta.phase_hd
-        # Only need one entry per base_prefix; pulse handled via file pattern
         for channel in ("CH1", "CH3"):
-            pattern = f"{base_prefix}{channel}-{shutter}_{CALIBRATION_PULSE:02d}.dat"
-            path = folder / pattern
-            if not path.exists():
-                continue
-            vals = np.array(read_numeric_file(path))
-            std = float(np.std(vals))
-            if std == 0.0:
-                continue
-            mean = float(np.mean(vals))
-            key = (base_prefix, channel, shutter)
-            calib[key] = (mean, std)
+            if shutter == "closed":
+                cal = _load_calibration_pulse(folder, base_prefix, channel, shutter)
+                if cal is None:
+                    continue
+                last_closed[channel] = cal
+                calib[(base_prefix, channel, shutter)] = cal
+            elif shutter == "open" and channel in last_closed:
+                calib[(base_prefix, channel, shutter)] = last_closed[channel]
     return calib
 
 
@@ -64,6 +83,19 @@ def calibrate_folder(input_folder: Path) -> Path:
     calib_map = find_calibration(meta_df, input_folder)
     if not calib_map:
         raise RuntimeError("No calibration pulse found (pulse 4 missing or zero std).")
+    missing_open = []
+    for _, meta in meta_df.iterrows():
+        if meta.shutter != "open":
+            continue
+        for channel in ("CH1", "CH3"):
+            key = (meta.base_prefix, channel, meta.shutter)
+            if key not in calib_map:
+                missing_open.append(f"{meta.base_prefix}{channel}-{meta.shutter}")
+    if missing_open:
+        missing_str = ", ".join(sorted(set(missing_open)))
+        raise RuntimeError(
+            f"No closed pulse-4 reference found before open shutter entries: {missing_str}"
+        )
 
     output_folder = input_folder.with_name(input_folder.name + "_calib")
     output_folder.mkdir(parents=True, exist_ok=True)
