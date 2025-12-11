@@ -65,8 +65,30 @@ def load_density_matrices(path: Path) -> Tuple[np.ndarray, np.ndarray]:
     imag = _parse_matrix(imag_lines) if imag_lines else np.zeros_like(real)
     return real, imag
 
+def calc_absolute(real_part: np.ndarray, imag_part: np.ndarray) -> np.ndarray:
+    return np.sqrt(real_part**2 +imag_part**2)
+
 
 def plot_density_part(values: np.ndarray, title: str, ax, dim_plot: int) -> None:
+    dim = min(dim_plot, values.shape[0])
+    vals = values[:dim, :dim]
+
+    x, y = np.meshgrid(np.arange(dim), np.arange(dim))
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+    z = vals.flatten()
+
+    dx = dy = 0.8
+    ax.bar3d(x_flat, y_flat, np.zeros_like(z), dx, dy, z, shade=True)
+    ax.set_xlabel("Row (i)")
+    ax.set_ylabel("Col (j)")
+    ax.set_zlabel(title)
+    ax.set_xticks(np.arange(dim))
+    ax.set_yticks(np.arange(dim))
+    ax.set_title(title)
+    ax.set_zlim(z.min(), z.max())
+
+def plot_absolute_part(values: np.ndarray, title: str, ax, dim_plot: int) -> None:
     dim = min(dim_plot, values.shape[0])
     vals = values[:dim, :dim]
 
@@ -102,6 +124,7 @@ def main():
         return
 
     rho_real, rho_imag = load_density_matrices(target)
+    rho_abs = calc_absolute(rho_real, rho_imag)
     zmin, zmax = shared_zlims(rho_real, rho_imag, DIM_PLOT)
 
     fig = plt.figure(figsize=(12, 5))
@@ -114,6 +137,13 @@ def main():
     ax_imag.set_zlim(zmin, zmax)
 
     fig.suptitle(target.name)
+    fig.tight_layout()
+    plt.show()
+
+    fig = plt.figure(figsize=(12, 5))
+    ax = fig.add_subplot(111, projection="3d")
+    plot_absolute_part(rho_abs, "|rho_ij|", ax, DIM_PLOT)
+    fig.suptitle(f"Absolute values of {target.name}")
     fig.tight_layout()
     plt.show()
 
