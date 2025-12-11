@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Visualize the real and imaginary parts of a reconstructed density matrix.
+Visualize the real, imaginary, or absolute value of a reconstructed density matrix.
 
 What it shows
 -------------
-- Left: 3D bar plot of Re(rho_ij) for the leading ``DIM_PLOT`` levels.
-- Right: 3D bar plot of Im(rho_ij) for the leading ``DIM_PLOT`` levels.
+- 3D bar plot of Re(rho_ij) for the leading ``DIM_PLOT`` levels (optional).
+- 3D bar plot of Im(rho_ij) for the leading ``DIM_PLOT`` levels (optional).
+- 3D bar plot of |rho_ij| for the leading ``DIM_PLOT`` levels (optional).
 
 How to use
 ----------
 1) Point ``TARGET_FILE`` to the desired ``*.rho.txt`` file (written by ``run_tomography.py``).
 2) Adjust ``DIM_PLOT`` to control how many levels are displayed along each axis.
-3) Run ``python Plot_density.py`` to view both plots side-by-side.
+3) Set ``PLOTS`` to any subset of {"Real", "Imaginary", "Absolute"}; each opens in its own window.
 """
 
 from pathlib import Path
@@ -21,9 +22,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Max levels to display on each axis
-DIM_PLOT = 5
+DIM_PLOT = 10
 # File containing both real and imaginary parts (QuTiP text export format)
-TARGET_FILE = Path(r"TomoOutput\wigner_CH3_closed_pulse1.rho.txt")
+TARGET_FILE = Path(r"TomoOutput\wigner_CH3_open_pulse1.rho.txt")
+# Which plots to show (case-insensitive): choose any subset of {"Real", "Imaginary", "Absolute"}
+PLOTS = ("Absolute")
 
 
 def _parse_matrix(lines) -> np.ndarray:
@@ -65,8 +68,18 @@ def load_density_matrices(path: Path) -> Tuple[np.ndarray, np.ndarray]:
     imag = _parse_matrix(imag_lines) if imag_lines else np.zeros_like(real)
     return real, imag
 
+
+def _normalize_plots(plots) -> Tuple[str, ...]:
+    """Accept string, tuple, or list for PLOTS and return a tuple of lower strings."""
+    if isinstance(plots, str):
+        plots_iter = (plots,)
+    else:
+        plots_iter = tuple(plots)  # type: ignore[arg-type]
+    return tuple(p.strip().lower() for p in plots_iter if str(p).strip())
+
+
 def calc_absolute(real_part: np.ndarray, imag_part: np.ndarray) -> np.ndarray:
-    return np.sqrt(real_part**2 +imag_part**2)
+    return np.sqrt(real_part**2 + imag_part**2)
 
 
 def plot_density_part(values: np.ndarray, title: str, ax, dim_plot: int) -> None:
@@ -86,7 +99,9 @@ def plot_density_part(values: np.ndarray, title: str, ax, dim_plot: int) -> None
     ax.set_xticks(np.arange(dim))
     ax.set_yticks(np.arange(dim))
     ax.set_title(title)
-    ax.set_zlim(z.min(), z.max())
+    # Anchor the floor at zero (or include negative values if present)
+    ax.set_zlim(min(0.0, z.min()), z.max())
+
 
 def plot_absolute_part(values: np.ndarray, title: str, ax, dim_plot: int) -> None:
     dim = min(dim_plot, values.shape[0])
@@ -105,14 +120,14 @@ def plot_absolute_part(values: np.ndarray, title: str, ax, dim_plot: int) -> Non
     ax.set_xticks(np.arange(dim))
     ax.set_yticks(np.arange(dim))
     ax.set_title(title)
-    ax.set_zlim(z.min(), z.max())
+    ax.set_zlim(0.0, z.max())
 
 
 def shared_zlims(real: np.ndarray, imag: np.ndarray, dim_plot: int) -> Tuple[float, float]:
     dim = min(dim_plot, real.shape[0], imag.shape[0])
     real_vals = real[:dim, :dim]
     imag_vals = imag[:dim, :dim]
-    zmin = min(real_vals.min(), imag_vals.min())
+    zmin = min(0.0, real_vals.min(), imag_vals.min())
     zmax = max(real_vals.max(), imag_vals.max())
     return zmin, zmax
 
@@ -124,27 +139,46 @@ def main():
         return
 
     rho_real, rho_imag = load_density_matrices(target)
-    rho_abs = calc_absolute(rho_real, rho_imag)
-    zmin, zmax = shared_zlims(rho_real, rho_imag, DIM_PLOT)
+    requested = set(_normalize_plots(PLOTS))
+    show_real = "real" in requested
+    show_imag = "imaginary" in requested or "imag" in requested
+    show_abs = "absolute" in requested
 
-    fig = plt.figure(figsize=(12, 5))
-    ax_real = fig.add_subplot(121, projection="3d")
-    ax_imag = fig.add_subplot(122, projection="3d")
+    z_shared = None
+    if show_real and show_imag:
+        z_shared = shared_zlims(rho_real, rho_imag, DIM_PLOT)
 
-    plot_density_part(rho_real, "Re(rho_ij)", ax_real, DIM_PLOT)
-    plot_density_part(rho_imag, "Im(rho_ij)", ax_imag, DIM_PLOT)
-    ax_real.set_zlim(zmin, zmax)
-    ax_imag.set_zlim(zmin, zmax)
+    if show_real:
+        fig = plt.figure(figsize=(6, 5))
+        ax_real = fig.add_subplot(111, projection="3d")
+        plot_density_part(rho_real, "Re(rho_ij)", ax_real, DIM_PLOT)
+        if z_shared:
+            ax_real.set_zlim(*z_shared)
+        fig.suptitle(target.name)
+        fig.tight_layout()
 
-    fig.suptitle(target.name)
-    fig.tight_layout()
-    plt.show()
+    if show_imag:
+        fig = plt.figure(figsize=(6, 5))
+        ax_imag = fig.add_subplot(111, projection="3d")
+        plot_density_part(rho_imag, "Im(rho_ij)", ax_imag, DIM_PLOT)
+        if z_shared:
+            ax_imag.set_zlim(*z_shared)
+        fig.suptitle(target.name)
+        fig.tight_layout()
 
-    fig = plt.figure(figsize=(12, 5))
-    ax = fig.add_subplot(111, projection="3d")
-    plot_absolute_part(rho_abs, "|rho_ij|", ax, DIM_PLOT)
-    fig.suptitle(f"Absolute values of {target.name}")
-    fig.tight_layout()
+    if show_abs:
+        rho_abs = calc_absolute(rho_real, rho_imag)
+        fig = plt.figure(figsize=(6, 5))
+        ax_abs = fig.add_subplot(111, projection="3d")
+        plot_absolute_part(rho_abs, "|rho_ij|", ax_abs, DIM_PLOT)
+        fig.suptitle(f"Absolute values of {target.name}")
+        fig.tight_layout()
+        print(rho_abs)
+
+    if not any((show_real, show_imag, show_abs)):
+        print("No plots requested in PLOTS; nothing to show.")
+        return
+
     plt.show()
 
 
