@@ -1,3 +1,5 @@
 __pycache__
 *.pyc
 TomoOutput/
+SimExp*.dat
+Acq_list.dat
