@@ -30,13 +30,11 @@ def quadrature_psi(q: np.ndarray, n: int) -> np.ndarray:
     """
     Harmonic-oscillator wavefunction psi_n(q) for the X quadrature.
 
-    The quadrature is scaled so the vacuum has std = 0.5 (x = (a + a†)/2),
-    hence we evaluate the standard wavefunction at q_std = sqrt(2) * q and
-    include the Jacobian factor sqrt(dq_std/dq) = 2**0.25.
+    Optics convention: x = (a + a^dagger)/sqrt(2), vacuum variance = 1/2.
     """
-    q_std = np.sqrt(2.0) * q
-    norm = np.exp(-0.5 * q_std * q_std) / (np.pi ** 0.25 * np.sqrt(2.0 ** n * np.exp(gammaln(n + 1))))
-    return (2.0 ** 0.25) * norm * eval_hermite(n, q_std)
+    norm = np.exp(-0.5 * q * q) / (np.pi ** 0.25 * np.sqrt(2.0 ** n * np.exp(gammaln(n + 1))))
+    return norm * eval_hermite(n, q)
+
 
 def _build_wavefunction_matrix(
     quadratures: Dict[float, np.ndarray],

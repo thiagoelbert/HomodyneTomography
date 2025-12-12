@@ -8,7 +8,7 @@ Pipeline in plain words
    its mean and std; for open shutters, reuse the most recent closed pulse 4
    (open pulse 4 is not vacuum).
 2) Shift every pulse so the vacuum mean is 0 and scale it so the vacuum std is
-   ``1/2`` (vacuum quadrature variance).
+   ``1/sqrt(2)`` (vacuum quadrature variance 1/2).
 3) Write all calibrated pulses to a sibling folder with suffix ``_calib`` and
    copy ``Acq_list.dat`` unchanged for reproducibility.
 """
@@ -20,7 +20,7 @@ import numpy as np
 
 from Reconstruction_core.collect_processed import load_acq_list, read_numeric_file
 
-TARGET_STD = 0.5  # vacuum quadrature std (variance = 0.25)
+TARGET_STD = 1 / np.sqrt(2)  # optics convention: vacuum quadrature std, variance = 0.5
 CALIBRATION_PULSE = 4
 
 

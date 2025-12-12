@@ -49,7 +49,7 @@ MAX_ITER = 5000
 MIN_PROB = 1e-9
 # Wigner grid resolution (points per axis) and half-width range
 WIGNER_POINTS = 500
-WIGNER_XMAX = 8.0
+WIGNER_XMAX = 5.0
 #Output directory
 OUTPUT_DIR = Path("TomoOutput")
 

@@ -24,7 +24,8 @@ SAMPLES_PER_PHASE = 8000
 SHUTTERS: Iterable[str] = ("open", "closed")
 VAC_STD = 1 / np.sqrt(2)  # calibrated vacuum std matching reconstruction convention
 # Coherent amplitude used for the open shots (can be complex)
-ALPHA = 0.1 + 0.0j
+ALPHA = 1 + 0.0j
+EFFICIENCY = 0.56
 RNG = np.random.default_rng(42)
 
 
@@ -94,7 +95,7 @@ def sample_photon_added_coherent(alpha: complex, phase: float, size: int) -> np.
     span = 5
     grid = np.linspace(x0-span, x0+span, 2001)
 
-    pdf = spac_quadratures_pdf(grid, alpha, phase, eta=1.0)
+    pdf = spac_quadratures_pdf(grid, alpha, phase, eta=EFFICIENCY)
     pdf /= np.trapezoid(pdf, grid)
     return draw_from_pdf(pdf, grid, size)
 
