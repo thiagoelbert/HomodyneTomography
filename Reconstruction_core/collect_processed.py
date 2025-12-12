@@ -32,11 +32,11 @@ def read_numeric_file(path: Path) -> np.ndarray:
 
 
 def load_acq_list(acq_list_path: Path) -> pd.DataFrame:
-    """Parse ``Acq_list.dat`` into ``base_prefix, shutter, phase_hd, file_root`` columns."""
+    """Parse ``Acq_list.dat`` into ``base_prefix, shutter, phase_hd, file_root, sig_mean, sig_var, dark_mean, dark_var`` columns."""
     rows = []
     lines = [ln for ln in acq_list_path.read_text().splitlines() if ln.strip()]
     if len(lines) < 2:
-        return pd.DataFrame(columns=["base_prefix", "shutter", "phase_hd", "file_root"])
+        return pd.DataFrame(columns=["base_prefix", "shutter", "phase_hd", "file_root", "sig_mean", "sig_var", "dark_mean", "dark_var"])
     for line in lines[1:]:  # skip header
         parts = line.split()
         # Expected columns (20): N, SigMean, SigVar, SigAll, DarkM, DarkV, FitEff3, Delay,
@@ -62,6 +62,10 @@ def load_acq_list(acq_list_path: Path) -> pd.DataFrame:
                 "shutter": shutter,
                 "phase_hd": phase_hd,
                 "file_root": file_root_name,
+                "sig_mean": float(parts[1]),
+                "sig_var": float(parts[2]),
+                "dark_mean": float(parts[4]),
+                "dark_var": float(parts[5]),
             }
         )
     return pd.DataFrame(rows)

@@ -4,9 +4,9 @@ Calibrate processed homodyne pulse files by using pulse 4 as vacuum.
 
 Pipeline in plain words
 -----------------------
-1) For closed shutters, read the processed pulse 4 (``*_04.dat``) and measure
-   its mean and std; for open shutters, reuse the most recent closed pulse 4
-   (open pulse 4 is not vacuum).
+1) For closed shutters, reuse the pulse-4 mean/variance already stored in
+   ``Acq_list.dat`` (DarkM/DarkV columns treated as vacuum); for open shutters,
+   reuse the most recent closed entry (open pulse 4 is not vacuum).
 2) Shift every pulse so the vacuum mean is 0 and scale it so the vacuum std is
    ``1/sqrt(2)`` (vacuum quadrature variance).
 3) Write all calibrated pulses to a sibling folder with suffix ``_calib`` and
@@ -17,28 +17,12 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import numpy as np
+import pandas as pd
 
 from Reconstruction_core.collect_processed import load_acq_list, read_numeric_file
 
 TARGET_STD = 1 / np.sqrt(2)  # vacuum quadrature std
-CALIBRATION_PULSE = 4
 
-
-def _load_calibration_pulse(folder: Path, base_prefix: str, channel: str, shutter: str):
-    """
-    Return (mean, std) for the calibration pulse, or None if the file is missing
-    or has zero variance.
-    """
-    pattern = f"{base_prefix}{channel}-{shutter}_{CALIBRATION_PULSE:02d}.dat"
-    path = folder / pattern
-    if not path.exists():
-        return None
-    vals = np.array(read_numeric_file(path))
-    std = float(np.std(vals))
-    if std == 0.0:
-        return None
-    mean = float(np.mean(vals))
-    return mean, std
 
 
 def write_numeric_file(path: Path, values: np.ndarray):
@@ -48,12 +32,12 @@ def write_numeric_file(path: Path, values: np.ndarray):
     path.write_text(text)
 
 
-def find_calibration(meta_df, folder: Path) -> Dict[Tuple[str, str, str], Tuple[float, float]]:
+def find_calibration(meta_df: pd.DataFrame) -> Dict[Tuple[str, str, str], Tuple[float, float]]:
     """
     Return mapping ``(base_prefix, channel, shutter) -> (mean, std)``.
 
     Calibration rules:
-    - Closed shutter entries use their own pulse-4 statistics.
+    - Closed shutter entries use DarkM/DarkV from ``Acq_list.dat`` as vacuum stats.
     - Open shutter entries reuse the most recent closed pulse-4 statistics for
       the same channel encountered earlier in ``Acq_list`` (open pulse 4 is not
       vacuum).
@@ -63,15 +47,19 @@ def find_calibration(meta_df, folder: Path) -> Dict[Tuple[str, str, str], Tuple[
     for _, meta in meta_df.iterrows():
         base_prefix = meta.base_prefix
         shutter = meta.shutter
-        for channel in ("CH1", "CH3"):
-            if shutter == "closed":
-                cal = _load_calibration_pulse(folder, base_prefix, channel, shutter)
-                if cal is None:
-                    continue
+        dark_mean = getattr(meta, "dark_mean", np.nan)
+        dark_var = getattr(meta, "dark_var", np.nan)
+        if shutter == "closed":
+            if np.isnan(dark_mean) or np.isnan(dark_var) or dark_var <= 0:
+                continue
+            cal = (float(dark_mean), float(np.sqrt(dark_var)))
+            for channel in ("CH1", "CH3"):
                 last_closed[channel] = cal
                 calib[(base_prefix, channel, shutter)] = cal
-            elif shutter == "open" and channel in last_closed:
-                calib[(base_prefix, channel, shutter)] = last_closed[channel]
+        elif shutter == "open":
+            for channel in ("CH1", "CH3"):
+                if channel in last_closed:
+                    calib[(base_prefix, channel, shutter)] = last_closed[channel]
     return calib
 
 
@@ -79,10 +67,11 @@ def calibrate_folder(input_folder: Path) -> Path:
     meta_df = load_acq_list(input_folder / "Acq_list.dat")
     if meta_df.empty:
         raise RuntimeError(f"No entries found in Acq_list.dat under {input_folder}")
+    print(meta_df)
 
-    calib_map = find_calibration(meta_df, input_folder)
+    calib_map = find_calibration(meta_df)
     if not calib_map:
-        raise RuntimeError("No calibration pulse found (pulse 4 missing or zero std).")
+        raise RuntimeError("No calibration stats found in Acq_list.dat (DarkM/DarkV missing or zero).")
     missing_open = []
     for _, meta in meta_df.iterrows():
         if meta.shutter != "open":
@@ -105,7 +94,6 @@ def calibrate_folder(input_folder: Path) -> Path:
     for _, meta in meta_df.iterrows():
         base_prefix = meta.base_prefix
         shutter = meta.shutter
-        phase = meta.phase_hd
         for channel in ("CH1", "CH3"):
             key = (base_prefix, channel, shutter)
             if key not in calib_map:
