@@ -1,5 +1,4 @@
 __pycache__
 *.pyc
 TomoOutput/
-SimExp*.dat
-Acq_list.dat
+single_photon_calib/
