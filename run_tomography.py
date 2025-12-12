@@ -34,10 +34,10 @@ from Reconstruction_core.collect_processed import collect
 from Reconstruction_core.mle_lvovsky import run_lvovsky_mle
 
 # Reconstruction defaults (tune here)
-DATA_FOLDER = Path(r"Data03121")
-# Channel, pulse and shutters to reconstruct
+DATA_FOLDER = Path(r"C:\Users\QOLAB10\Downloads\251212\2")
+# Channel, pulses and shutters to reconstruct
 CHANNEL = "CH3"
-PULSE = 1
+PULSES = (1, 4)
 SHUTTERS = ("open", "closed")
 # Fock cutoff dimension for density matrix (larger is slower)
 CUTOFF = 20
@@ -142,18 +142,19 @@ def main():
     t_calib = time.perf_counter() - t0
 
     t1 = time.perf_counter()
-    df = collect(calib_folder, channels=[CHANNEL], pulses=[PULSE], shutters=SHUTTERS)
+    df = collect(calib_folder, channels=[CHANNEL], pulses=list(PULSES), shutters=SHUTTERS)
     t_collect = time.perf_counter() - t1
 
     t2 = time.perf_counter()
-    for shutter in SHUTTERS:
-        subset = df[(df["channel"] == CHANNEL) & (df["shutter"] == shutter) & (df["pulse"] == PULSE)]
-        if subset.empty:
-            print(f"No data for {CHANNEL} {shutter} pulse {PULSE}")
-            continue
-        quadratures = build_quadrature_dict(subset)
-        outfile = OUTPUT_DIR / f"wigner_{CHANNEL}_{shutter}_pulse{PULSE}.npz"
-        reconstruct_wigner(quadratures, f"Wigner {CHANNEL} {shutter} pulse {PULSE}", save_path=outfile)
+    for pulse in PULSES:
+        for shutter in SHUTTERS:
+            subset = df[(df["channel"] == CHANNEL) & (df["shutter"] == shutter) & (df["pulse"] == pulse)]
+            if subset.empty:
+                print(f"No data for {CHANNEL} {shutter} pulse {pulse}")
+                continue
+            quadratures = build_quadrature_dict(subset)
+            outfile = OUTPUT_DIR / f"wigner_{CHANNEL}_{shutter}_pulse{pulse}.npz"
+            reconstruct_wigner(quadratures, f"Wigner {CHANNEL} {shutter} pulse {pulse}", save_path=outfile)
     t_reconstruct = time.perf_counter() - t2
 
     print(
