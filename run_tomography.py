@@ -34,7 +34,7 @@ from Reconstruction_core.collect_processed import collect
 from Reconstruction_core.mle_lvovsky import run_lvovsky_mle
 
 # Reconstruction defaults (tune here)
-DATA_FOLDER = Path(r"C:\Users\QOLAB10\Downloads\251212\2")
+DATA_FOLDER = Path(r"Simulation\single_photon_calib")
 # Channel, pulses and shutters to reconstruct
 CHANNEL = "CH3"
 PULSES = (1, 4)
@@ -49,7 +49,7 @@ MAX_ITER = 5000
 MIN_PROB = 1e-9
 # Wigner grid resolution (points per axis) and half-width range
 WIGNER_POINTS = 500
-WIGNER_XMAX = 5.0
+WIGNER_XMAX = 8.0
 #Output directory
 OUTPUT_DIR = Path("TomoOutput")
 
