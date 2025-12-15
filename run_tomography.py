@@ -53,6 +53,13 @@ WIGNER_XMAX = 5.0
 #Output directory
 OUTPUT_DIR = Path("TomoOutput")
 
+STATE_LABELS = {
+    ("open", 1): "SPAC",
+    ("open", 4): "Coherent",
+    ("closed", 1): "Single photon",
+    ("closed", 4): "Vacuum",
+}
+
 
 def build_quadrature_dict(subset) -> Dict[float, np.ndarray]:
     """Collect concatenated quadrature samples per phase from a filtered DataFrame."""
@@ -154,7 +161,9 @@ def main():
                 continue
             quadratures = build_quadrature_dict(subset)
             outfile = OUTPUT_DIR / f"wigner_{CHANNEL}_{shutter}_pulse{pulse}.npz"
-            reconstruct_wigner(quadratures, f"Wigner {CHANNEL} {shutter} pulse {pulse}", save_path=outfile)
+            state_label = STATE_LABELS.get((shutter.lower(), pulse), "Unknown state")
+            title = f"Wigner {CHANNEL} {shutter} pulse {pulse} ({state_label})"
+            reconstruct_wigner(quadratures, title, save_path=outfile)
     t_reconstruct = time.perf_counter() - t2
 
     print(

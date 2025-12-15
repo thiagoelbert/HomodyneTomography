@@ -19,13 +19,13 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "single_photon_calib"
 CHANNEL = "CH3"  # default channel used in the tomography script
 TARGET_PULSE = 1
 CALIBRATION_PULSE = 4
-PHASES = np.linspace(0.0, np.pi, 12, endpoint=False)  # equally spaced LO phases
+PHASES = np.linspace(0.0, np.pi, 12, endpoint=True)  # equally spaced LO phases
 SAMPLES_PER_PHASE = 8000
 SHUTTERS: Iterable[str] = ("open", "closed")
 VAC_STD = 1 / np.sqrt(2)  # calibrated vacuum std matching reconstruction convention
 # Coherent amplitude used for the open shots (can be complex)
-ALPHA = 1 + 0.0j
-EFFICIENCY = 0.56
+ALPHA = .0 + 0.0j
+EFFICIENCY = 1
 RNG = np.random.default_rng(42)
 
 
@@ -46,6 +46,13 @@ def sample_single_photon(size: int) -> np.ndarray:
     signs = RNG.choice((-1.0, 1.0), size=size)
     return signs * np.sqrt(u)
 
+def sample_noisy_single_photon(size: int, eta: float) -> np.ndarray:
+    """
+    Sample quadratures from a lossy single photon state with efficiency eta.
+    """
+    single = sample_single_photon(np.round(size*eta).astype(int))
+    vacuum = sample_vacuum(np.round(size*(1-eta)).astype(int))
+    return np.concatenate((single, vacuum))
 
 def sample_coherent(alpha: complex, phase: float, size: int) -> np.ndarray:
     """Sample a coherent state; quadrature mean follows the LO phase."""
@@ -135,7 +142,7 @@ def generate_dataset() -> None:
             if shutter == "open":
                 main_samples = sample_photon_added_coherent(ALPHA, phase, SAMPLES_PER_PHASE)
             else:
-                main_samples = sample_single_photon(SAMPLES_PER_PHASE)
+                main_samples = sample_noisy_single_photon(SAMPLES_PER_PHASE, EFFICIENCY)
 
             pulse_path = OUTPUT_DIR / f"{base_prefix}{CHANNEL}-{shutter}_{TARGET_PULSE:02d}.dat"
             write_numeric_file(pulse_path, main_samples)
