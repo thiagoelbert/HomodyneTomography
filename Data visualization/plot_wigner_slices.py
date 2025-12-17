@@ -23,9 +23,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-TARGET_FILE = Path(r"\TomoOutput\wigner_CH3_open_pulse1.npz")
+TARGET_FILE = Path(r"TomoOutput\wigner_CH3_open_pulse4.npz")
 # Target slice phase (radians). 0 -> x axis, np.pi/2 -> p axis.
-SLICE_PHASE = np.pi / 2
+SLICE_PHASE = 0
 # Number of points along the slice
 N_SLICE_POINTS = 400
 

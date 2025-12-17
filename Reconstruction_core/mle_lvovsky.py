@@ -27,9 +27,14 @@ from scipy.special import eval_hermite, gammaln
 
 
 def quadrature_psi(q: np.ndarray, n: int) -> np.ndarray:
-    """Harmonic-oscillator wavefunction psi_n(q) for the X quadrature."""
+    """
+    Harmonic-oscillator wavefunction psi_n(q) for the X quadrature.
+
+    Optics convention: x = (a + a^dagger)/sqrt(2), vacuum variance = 1/2.
+    """
     norm = np.exp(-0.5 * q * q) / (np.pi ** 0.25 * np.sqrt(2.0 ** n * np.exp(gammaln(n + 1))))
     return norm * eval_hermite(n, q)
+
 
 def _build_wavefunction_matrix(
     quadratures: Dict[float, np.ndarray],

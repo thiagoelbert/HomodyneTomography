@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Max levels to display on each axis
-DIM_PLOT = 10
+DIM_PLOT = 20
 # File containing both real and imaginary parts (QuTiP text export format)
 TARGET_FILE = Path(r"TomoOutput\wigner_CH3_open_pulse1.rho.txt")
 # Which plots to show (case-insensitive): choose any subset of {"Real", "Imaginary", "Absolute"}
