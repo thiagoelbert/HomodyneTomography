@@ -26,7 +26,7 @@ DATA_FOLDER = Path(r"I:\290126\1")
 # Same filter knobs as run_tomography.py
 CHANNEL = "CH3"
 PULSES = [4]
-SHUTTERS = ["closed"]
+SHUTTERS = ["open"]
 # Histogram bins
 BINS = 50
 
@@ -122,7 +122,19 @@ def main():
                 seq_index = info["sequence_index"]
                 ax = axes[phase_index, seq_index]
 
-                ax.hist(row["values"], bins=BINS, alpha=0.85)
+                vals = row["values"]
+                mean = float(np.mean(vals))
+                std = float(np.std(vals))
+                ax.hist(vals, bins=BINS, alpha=0.85)
+                ax.text(
+                    0.98,
+                    0.98,
+                    f"mean={mean:.3e}\nstd={std:.3e}",
+                    transform=ax.transAxes,
+                    ha="right",
+                    va="top",
+                    fontsize=8,
+                )
                 ax.set_xlim(x_min, x_max)
                 if phase_index == 0:
                     ax.set_title(f"Seq {seq_index + 1}")
