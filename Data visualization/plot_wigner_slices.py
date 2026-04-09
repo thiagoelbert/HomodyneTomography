@@ -20,19 +20,54 @@ from pathlib import Path
 from typing import Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 import numpy as np
 
 
-TARGET_FILE = Path(r"TomoOutput\wigner_CH3_open_pulse4.npz")
+TARGET_FILE = Path(r"TomoOutput\wigner_CH3_closed_pulse1.npz")
 # Target slice phase (radians). 0 -> x axis, np.pi/2 -> p axis.
 SLICE_PHASE = 0
 # Number of points along the slice
 N_SLICE_POINTS = 400
+BASE_CMAP = "viridis"# "RdBu_r"
+# If True, zero is forced to the midpoint color using a truncated linear
+# colormap. If False, the base colormap is applied directly over [min(W), max(W)].
+FIX_ZERO_COLOR = True
 
 
 def load_npz(path: Path):
     data = np.load(path)
     return data["xvec"], data["pvec"], data["W"]
+
+
+def truncated_colormap_for_zero(base_cmap_name: str, zero_position: float, n: int = 256):
+    """
+    Return a linear subrange of the base colormap such that:
+    - values are still mapped linearly over [vmin, vmax]
+    - the normalized data value for zero is mapped to the midpoint color
+    - unused colors, if any, are trimmed from one colormap end instead of
+      warping the color progression
+    """
+    base = plt.get_cmap(base_cmap_name)
+    zero_position = float(np.clip(zero_position, 0.0, 1.0))
+
+    if zero_position <= 0.0 or zero_position >= 1.0:
+        return base
+
+    # Choose the widest linear subrange [cmin, cmax] such that the linear map
+    # from data-normalized position t to colormap position c satisfies c(0)=0.5.
+    if zero_position < 0.5:
+        cmax = 1.0
+        cmin = (0.5 - zero_position) / (1.0 - zero_position)
+    elif zero_position > 0.5:
+        cmin = 0.0
+        cmax = 0.5 / zero_position
+    else:
+        cmin, cmax = 0.0, 1.0
+
+    samples = np.linspace(cmin, cmax, n)
+    colors = base(samples)
+    return LinearSegmentedColormap.from_list(f"{base_cmap_name}_trunc", colors, N=n)
 
 
 def bilinear_interpolate(xvec: np.ndarray, pvec: np.ndarray, W: np.ndarray, xq: np.ndarray, pq: np.ndarray):
@@ -94,8 +129,16 @@ def main():
         return
 
     xvec, pvec, W = load_npz(target)
+    w_min = float(np.min(W))
+    w_max = float(np.max(W))
 
     q, Wq, x_line, p_line = make_slice(xvec, pvec, W, SLICE_PHASE)
+    norm = Normalize(vmin=w_min, vmax=w_max)
+    if FIX_ZERO_COLOR and w_min < 0.0 < w_max:
+        zero_position = (0.0 - w_min) / (w_max - w_min)
+        cmap = truncated_colormap_for_zero(BASE_CMAP, zero_position=zero_position)
+    else:
+        cmap = plt.get_cmap(BASE_CMAP)
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
 
@@ -103,7 +146,8 @@ def main():
         W,
         extent=[xvec.min(), xvec.max(), pvec.min(), pvec.max()],
         origin="lower",
-        cmap="viridis",
+        cmap=cmap,
+        norm=norm,
         aspect="equal",  # keep same scale on x and p
     )
     # Overlay the slice direction on the heatmap for visual reference
