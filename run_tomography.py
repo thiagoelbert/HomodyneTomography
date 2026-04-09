@@ -50,6 +50,8 @@ NBINS_LVOVSKY = 120
 TOL = 1e-7
 MAX_ITER = 5000
 MIN_PROB = 1e-9
+# Homodyne detection efficiency for loss-aware reconstruction of the pre-loss state
+DETECTION_EFFICIENCY = 0.60
 # Wigner grid resolution (points per axis) and half-width range
 WIGNER_POINTS = 500
 WIGNER_XMAX = 5.0
@@ -80,12 +82,12 @@ def build_quadrature_dict(subset) -> Dict[float, np.ndarray]:
     return quadratures
 
 
-def estimate_single_photon_efficiency(rho: np.ndarray) -> Optional[float]:
-    """Estimate |1><1| population as the single-photon efficiency."""
+def estimate_single_photon_population(rho: np.ndarray) -> Optional[float]:
+    """Estimate the reconstructed |1><1| population."""
     if rho.shape[0] < 2:
         return None
-    eta = float(np.real(rho[1, 1]))
-    return max(0.0, min(1.0, eta))
+    pop1 = float(np.real(rho[1, 1]))
+    return max(0.0, min(1.0, pop1))
 
 
 def fit_coherent_alpha(
@@ -123,6 +125,7 @@ def reconstruct_wigner(
     title: str,
     save_path: Optional[Path] = None,
     state_label: str = "",
+    eta: float = DETECTION_EFFICIENCY,
 ):
     """
     Run Lvovsky MLE on the provided quadrature samples and optionally persist
@@ -139,6 +142,7 @@ def reconstruct_wigner(
     rho_hat, info = run_lvovsky_mle(
         quadratures,
         cutoff=CUTOFF,
+        eta=eta,
         max_iter=MAX_ITER,
         tol=TOL,
         min_prob=MIN_PROB,
@@ -146,7 +150,7 @@ def reconstruct_wigner(
     )
     mle_status = (
         f"Lvovsky converged={info['converged']} iterations={info['iterations']} "
-        f"delta={info['delta']:.2e} nbins={info['nbins']}"
+        f"delta={info['delta']:.2e} nbins={info['nbins']} eta={info['eta']:.3f}"
     )
     print(f"MLE status: {mle_status}")
 
@@ -154,26 +158,26 @@ def reconstruct_wigner(
     pvec = np.linspace(-WIGNER_XMAX, WIGNER_XMAX, WIGNER_POINTS)
     W = qt.wigner(qt.Qobj(rho_hat), xvec, pvec)
 
-    efficiency = None
+    single_photon_population = None
     alpha_fit = None
     label_lower = state_label.lower()
     if "single photon" in label_lower:
-        efficiency = estimate_single_photon_efficiency(rho_hat)
+        single_photon_population = estimate_single_photon_population(rho_hat)
     if label_lower == "coherent" or "coherent" in label_lower:
         alpha_fit = fit_coherent_alpha(
             rho_hat,
             alpha_max=WIGNER_XMAX / np.sqrt(2.0),
         )
 
-    if efficiency is not None:
-        print(f"Single-photon efficiency (eta): {efficiency:.3f}")
+    if single_photon_population is not None:
+        print(f"Single-photon population rho[1,1]: {single_photon_population:.3f}")
     if alpha_fit is not None:
         print(f"Coherent alpha fit: {_format_complex(alpha_fit)}")
 
     if save_path is not None:
         save_path.parent.mkdir(parents=True, exist_ok=True)
         alpha_payload = alpha_fit if alpha_fit is not None else np.nan + 1j * np.nan
-        efficiency_payload = efficiency if efficiency is not None else np.nan
+        efficiency_payload = single_photon_population if single_photon_population is not None else np.nan
         np.savez(
             save_path,
             xvec=xvec,
@@ -185,7 +189,8 @@ def reconstruct_wigner(
             cutoff=CUTOFF,
             tol=TOL,
             max_iter=MAX_ITER,
-            fit_single_photon_efficiency=efficiency_payload,
+            detection_efficiency=eta,
+            fit_single_photon_population=efficiency_payload,
             fit_coherent_alpha=alpha_payload,
         )
         # Also write density matrix as a text file
@@ -252,7 +257,13 @@ def main():
             outfile = OUTPUT_DIR / f"wigner_{CHANNEL}_{shutter}_pulse{pulse}.npz"
             state_label = STATE_LABELS.get((shutter.lower(), pulse), "Unknown state")
             title = f"Wigner {CHANNEL} {shutter} pulse {pulse} ({state_label})"
-            reconstruct_wigner(quadratures, title, save_path=outfile, state_label=state_label)
+            reconstruct_wigner(
+                quadratures,
+                title,
+                save_path=outfile,
+                state_label=state_label,
+                eta=DETECTION_EFFICIENCY,
+            )
     t_reconstruct = time.perf_counter() - t2
 
     print(

@@ -58,6 +58,7 @@ Open `run_tomography.py` and adjust the constants near the top:
 - `PULSE`: pulse number to reconstruct (e.g., `1`).
 - `SHUTTERS`: which shutter states to process, e.g., `(\"open\", \"closed\")`.
 - `CUTOFF`, `NBINS_LVOVSKY`, `TOL`, `MAX_ITER`, `MIN_PROB`: reconstruction settings (defaults work to start).
+- `DETECTION_EFFICIENCY`: homodyne efficiency `eta`; set `< 1` to reconstruct the pre-loss state.
 - `WIGNER_POINTS`, `WIGNER_XMAX`: grid resolution/range for the Wigner plot.
 - `OUTPUT_DIR`: where results are saved (default `TomoOutput`).
 

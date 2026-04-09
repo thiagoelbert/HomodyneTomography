@@ -20,7 +20,7 @@ Outputs
 
 from __future__ import annotations
 
-from typing import Dict, Tuple, cast, Optional
+from typing import Dict, List, Tuple, cast, Optional
 
 import numpy as np
 from scipy.special import eval_hermite, gammaln
@@ -34,6 +34,96 @@ def quadrature_psi(q: np.ndarray, n: int) -> np.ndarray:
     """
     norm = np.exp(-0.5 * q * q) / (np.pi ** 0.25 * np.sqrt(2.0 ** n * np.exp(gammaln(n + 1))))
     return norm * eval_hermite(n, q)
+
+
+def _validate_eta(eta: float) -> float:
+    """Validate the homodyne efficiency parameter."""
+    eta = float(eta)
+    if not (0.0 < eta <= 1.0):
+        raise ValueError(f"`eta` must satisfy 0 < eta <= 1, got {eta}.")
+    return eta
+
+
+def _loss_diagonal_coefficients(cutoff: int, eta: float) -> List[np.ndarray]:
+    """
+    Return Bernoulli coefficients for each loss sector ``k`` within the cutoff.
+
+    For a fixed ``k``, the returned vector has length ``cutoff - k`` and stores
+    ``B_{n+k,n}(eta)`` for ``n = 0, ..., cutoff-k-1``.
+    """
+    eta = _validate_eta(eta)
+    if cutoff <= 0:
+        return []
+
+    if eta == 1.0:
+        return [np.ones(cutoff, dtype=float)] + [np.zeros(cutoff - k, dtype=float) for k in range(1, cutoff)]
+
+    log_eta = np.log(eta)
+    log_one_minus_eta = np.log1p(-eta)
+    coeffs: List[np.ndarray] = []
+
+    for k in range(cutoff):
+        n = np.arange(cutoff - k, dtype=float)
+        log_binom = gammaln(n + k + 1.0) - gammaln(n + 1.0) - gammaln(k + 1.0)
+        log_coeff = 0.5 * (log_binom + n * log_eta + k * log_one_minus_eta)
+        coeffs.append(np.exp(log_coeff))
+    return coeffs
+
+
+def apply_loss_map(rho: np.ndarray, eta: float) -> np.ndarray:
+    """
+    Apply the Bernoulli loss channel to ``rho`` in the truncated Fock basis.
+
+    The output has the same truncation dimension as ``rho`` and is given by
+    Lvovsky's generalized Bernoulli transformation restricted consistently to
+    the available matrix elements.
+    """
+    eta = _validate_eta(eta)
+    if rho.ndim != 2 or rho.shape[0] != rho.shape[1]:
+        raise ValueError("`rho` must be a square matrix.")
+    if eta == 1.0:
+        return np.array(rho, dtype=np.complex128, copy=True)
+
+    cutoff = rho.shape[0]
+    coeffs = _loss_diagonal_coefficients(cutoff, eta)
+    rho_eta = np.zeros_like(rho, dtype=np.complex128)
+
+    for k, coeff in enumerate(coeffs):
+        if coeff.size == 0:
+            continue
+        block = rho[k:, k:]
+        rho_eta[: cutoff - k, : cutoff - k] += coeff[:, None] * block * coeff[None, :]
+
+    rho_eta = 0.5 * (rho_eta + rho_eta.conj().T)
+    trace = np.trace(rho_eta).real
+    if trace > 0.0:
+        rho_eta /= trace
+    return rho_eta
+
+
+def quadrature_probability(
+    rho: np.ndarray,
+    x: np.ndarray,
+    phi: float,
+    eta: float = 1.0,
+) -> np.ndarray:
+    """
+    Evaluate the predicted quadrature distribution at phase ``phi``.
+
+    When ``eta < 1``, the function first applies the Bernoulli loss channel and
+    then evaluates the ideal quadrature probability of the resulting state.
+    """
+    if rho.ndim != 2 or rho.shape[0] != rho.shape[1]:
+        raise ValueError("`rho` must be a square matrix.")
+
+    x = np.asarray(x, dtype=float)
+    cutoff = rho.shape[0]
+    n = np.arange(cutoff)
+    psi_vals = np.stack([quadrature_psi(x, k) for k in range(cutoff)], axis=1)
+    W = psi_vals * np.exp(-1j * n * phi)
+    rho_eff = apply_loss_map(rho, eta)
+    probs = np.real(np.sum((W @ rho_eff) * np.conj(W), axis=1))
+    return np.clip(probs, 0.0, None)
 
 
 def _build_wavefunction_matrix(
@@ -102,6 +192,7 @@ def _build_wavefunction_matrix(
 def _lvovsky_step(
     rho: np.ndarray,
     W: np.ndarray,
+    eta: float = 1.0,
     weights: Optional[np.ndarray] = None,
     min_prob: float = 1e-12,
 ) -> Tuple[np.ndarray, float, float, float]:
@@ -128,7 +219,17 @@ def _lvovsky_step(
     p_min, p_max:
         Extremal probabilities encountered in this step.
     """
-    probs = np.real(np.sum((W @ rho) * np.conj(W), axis=1))
+    eta = _validate_eta(eta)
+    coeffs = _loss_diagonal_coefficients(rho.shape[0], eta)
+    probs = np.zeros(W.shape[0], dtype=float)
+
+    for k, coeff in enumerate(coeffs):
+        if coeff.size == 0 or not np.any(coeff):
+            continue
+        phi_k = W[:, : rho.shape[0] - k] * coeff[None, :]
+        rho_block = rho[k:, k:]
+        probs += np.real(np.sum((phi_k @ rho_block) * np.conj(phi_k), axis=1))
+
     probs = np.clip(probs, min_prob, None)
     if weights is None:
         weights_arr = np.ones_like(probs)
@@ -138,8 +239,14 @@ def _lvovsky_step(
 
     # R = (1/N) sum_i (weights_i / p_i) |psi_i><psi_i|
     scaled = weights_arr / probs
-    weighted_W = W * scaled[:, None]
-    R = (W.conj().T @ weighted_W) / total_counts
+    R = np.zeros_like(rho, dtype=np.complex128)
+    for k, coeff in enumerate(coeffs):
+        if coeff.size == 0 or not np.any(coeff):
+            continue
+        phi_k = W[:, : rho.shape[0] - k] * coeff[None, :]
+        weighted_phi_k = phi_k * scaled[:, None]
+        R[k:, k:] += phi_k.conj().T @ weighted_phi_k
+    R /= total_counts
 
     rho_next = R @ rho @ R
     rho_next = 0.5 * (rho_next + rho_next.conj().T)  # enforce Hermiticity
@@ -154,6 +261,7 @@ def _lvovsky_step(
 def run_lvovsky_mle(
     quadratures: Dict[float, np.ndarray],
     cutoff: int,
+    eta: float = 1.0,
     max_iter: int = 200,
     tol: float = 1e-7,
     min_prob: float = 1e-12,
@@ -168,6 +276,9 @@ def run_lvovsky_mle(
         Mapping phase (radians) -> 1D array of quadrature samples.
     cutoff:
         Fock cutoff dimension for the reconstruction (rho is ``cutoff x cutoff``).
+    eta:
+        Homodyne detection efficiency. ``eta=1`` recovers the ideal detector
+        model, while ``eta<1`` reconstructs the pre-loss state.
     max_iter:
         Maximum number of iterations before giving up.
     tol:
@@ -184,6 +295,7 @@ def run_lvovsky_mle(
     info:
         Dict with convergence metadata (iterations, converged, deltas, p_min/max).
     """
+    eta = _validate_eta(eta)
     W, weights = _build_wavefunction_matrix(quadratures, cutoff, nbins=nbins)
     rho = np.eye(cutoff, dtype=np.complex128) / float(cutoff)
 
@@ -193,7 +305,7 @@ def run_lvovsky_mle(
     converged = False
 
     for it in range(1, max_iter + 1):
-        rho, delta, p_min, p_max = _lvovsky_step(rho, W, weights=weights, min_prob=min_prob)
+        rho, delta, p_min, p_max = _lvovsky_step(rho, W, eta=eta, weights=weights, min_prob=min_prob)
         deltas.append(delta)
         pmins.append(p_min)
         pmaxs.append(p_max)
@@ -209,5 +321,6 @@ def run_lvovsky_mle(
         "p_min": min(pmins),
         "p_max": max(pmaxs),
         "nbins": nbins,
+        "eta": eta,
     }
     return rho, info
