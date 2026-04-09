@@ -31,12 +31,13 @@ from scipy.optimize import minimize
 import time
 
 from Reconstruction_core.calibrate_dataset import calibrate_folder
+from Reconstruction_core.calibrate_phase import calibrate_phase
 
 from Reconstruction_core.collect_processed import collect
 from Reconstruction_core.mle_lvovsky import run_lvovsky_mle
 
 # Reconstruction defaults (tune here)
-DATA_FOLDER = Path(r"Simulation\single_photon_calib")
+DATA_FOLDER = Path(r"I:\230226\3")
 # Channel, pulses and shutters to reconstruct
 CHANNEL = "CH3"
 PULSES = (1, 4)
@@ -56,6 +57,8 @@ WIGNER_XMAX = 5.0
 ALPHA_FIT_MAX_ITER = 200
 #Output directory
 OUTPUT_DIR = Path("TomoOutput")
+# Optional phase calibration after scale calibration
+ENABLE_PHASE_CALIBRATION = True
 
 STATE_LABELS = {
     ("open", 1): "SPAC",
@@ -208,11 +211,30 @@ def reconstruct_wigner(
 
 def main():
     t0 = time.perf_counter()
-    if DATA_FOLDER.name.endswith("_calib"):
+    if DATA_FOLDER.name.endswith("_phasecalib"):
+        calib_folder = DATA_FOLDER
+        print(f"Using existing phase-calibrated folder: {calib_folder}")
+    elif DATA_FOLDER.name.endswith("_calib"):
         calib_folder = DATA_FOLDER
         print(f"Using existing calibrated folder: {calib_folder}")
     else:
-        calib_folder = calibrate_folder(DATA_FOLDER)
+        existing_calib = DATA_FOLDER.with_name(DATA_FOLDER.name + "_calib")
+        if existing_calib.exists() and (existing_calib / "Acq_list.dat").exists():
+            calib_folder = existing_calib
+            print(f"Using existing calibrated folder: {calib_folder}")
+        else:
+            calib_folder = calibrate_folder(DATA_FOLDER)
+
+    if ENABLE_PHASE_CALIBRATION:
+        if calib_folder.name.endswith("_phasecalib"):
+            print(f"Phase calibration already present: {calib_folder}")
+        else:
+            existing_phasecalib = calib_folder.with_name(calib_folder.name + "_phasecalib")
+            if existing_phasecalib.exists() and (existing_phasecalib / "Acq_list.dat").exists():
+                calib_folder = existing_phasecalib
+                print(f"Using existing phase-calibrated folder: {calib_folder}")
+            else:
+                calib_folder = calibrate_phase(calib_folder)
     t_calib = time.perf_counter() - t0
 
     t1 = time.perf_counter()
