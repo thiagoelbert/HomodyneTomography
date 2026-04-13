@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import Normalize
 import numpy as np
+import qutip as qt
+from scipy.optimize import minimize, minimize_scalar
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +28,101 @@ def format_nbins_label(nbins) -> str:
     return "raw" if nbins is None else str(int(nbins))
 
 
+def coherent_state_fidelity(rho: np.ndarray, alpha: complex) -> float:
+    rho_obj = qt.Qobj(rho)
+    target_dm = qt.ket2dm(qt.coherent(rho.shape[0], alpha))
+    return float(qt.fidelity(rho_obj, target_dm))
+
+
+def find_closest_coherent_state(rho: np.ndarray) -> tuple[complex, float]:
+    rho_obj = qt.Qobj(rho)
+    dim = rho.shape[0]
+    alpha0 = qt.expect(qt.destroy(dim), rho_obj)
+    alpha_max = 5.0 / np.sqrt(2.0)
+    bounds = [(-alpha_max, alpha_max), (-alpha_max, alpha_max)]
+
+    def objective(params: np.ndarray) -> float:
+        alpha = complex(params[0], params[1])
+        target_dm = qt.ket2dm(qt.coherent(dim, alpha))
+        return -float(qt.fidelity(rho_obj, target_dm))
+
+    res = minimize(
+        objective,
+        x0=np.array([alpha0.real, alpha0.imag], dtype=float),
+        method="L-BFGS-B",
+        bounds=bounds,
+        options={"maxiter": 200},
+    )
+    alpha_fit = complex(float(res.x[0]), float(res.x[1]))
+    fidelity = coherent_state_fidelity(rho, alpha_fit)
+    return alpha_fit, fidelity
+
+
+def single_photon_mixture_density_matrix(dim: int, p1: float) -> qt.Qobj:
+    p1 = float(np.clip(p1, 0.0, 1.0))
+    diag = np.zeros(dim, dtype=float)
+    diag[0] = 1.0 - p1
+    if dim > 1:
+        diag[1] = p1
+    return qt.Qobj(np.diag(diag))
+
+
+def single_photon_mixture_fidelity(rho: np.ndarray, p1: float) -> float:
+    rho_obj = qt.Qobj(rho)
+    target_dm = single_photon_mixture_density_matrix(rho.shape[0], p1)
+    return float(qt.fidelity(rho_obj, target_dm))
+
+
+def find_closest_single_photon_mixture(rho: np.ndarray) -> tuple[float, float]:
+    rho_obj = qt.Qobj(rho)
+
+    def objective(p1: float) -> float:
+        target_dm = single_photon_mixture_density_matrix(rho.shape[0], p1)
+        return -float(qt.fidelity(rho_obj, target_dm))
+
+    res = minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded")
+    p1_best = float(np.clip(res.x, 0.0, 1.0))
+    fidelity = single_photon_mixture_fidelity(rho, p1_best)
+    return p1_best, fidelity
+
+
+def compute_fidelity_metrics(summary, states: list[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    nbins_values = summary["nbins_values"]
+    eta_values = summary["eta_values"]
+    result_files = summary["result_files"]
+    state_index = {state: idx for idx, state in enumerate(states)}
+
+    open4_alpha = np.full((len(nbins_values), len(eta_values)), np.nan + 1j * np.nan, dtype=np.complex128)
+    open4_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
+    closed1_pop = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
+    closed1_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
+
+    open4_idx = state_index.get("open4")
+    closed1_idx = state_index.get("closed1")
+
+    for i in range(len(nbins_values)):
+        for j in range(len(eta_values)):
+            if open4_idx is not None:
+                open4_file = Path(str(result_files[i, j, open4_idx]))
+                if open4_file.exists():
+                    with np.load(open4_file, allow_pickle=False) as data:
+                        rho = np.array(data["rho"], copy=False)
+                    alpha_fit, fidelity = find_closest_coherent_state(rho)
+                    open4_alpha[i, j] = alpha_fit
+                    open4_fidelity[i, j] = fidelity
+
+            if closed1_idx is not None:
+                closed1_file = Path(str(result_files[i, j, closed1_idx]))
+                if closed1_file.exists():
+                    with np.load(closed1_file, allow_pickle=False) as data:
+                        rho = np.array(data["rho"], copy=False)
+                    p1_best, fidelity = find_closest_single_photon_mixture(rho)
+                    closed1_pop[i, j] = p1_best
+                    closed1_fidelity[i, j] = fidelity
+
+    return open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity
+
+
 def barplot3d(
     ax,
     data: np.ndarray,
@@ -35,6 +132,7 @@ def barplot3d(
     cmap: str,
     zmin=None,
     zmax=None,
+    base_at_min: bool = False,
 ) -> None:
     y_idx, x_idx = np.meshgrid(np.arange(len(nbins_values)), np.arange(len(eta_values)), indexing="ij")
     xpos = x_idx.ravel()
@@ -56,8 +154,13 @@ def barplot3d(
     clipped = np.nan_to_num(dz, nan=zmin)
     norm = Normalize(vmin=zmin, vmax=zmax)
     colors = cm.get_cmap(cmap)(norm(clipped))
+    if base_at_min:
+        zpos = np.full_like(xpos, zmin, dtype=float)
+        dz_plot = clipped - zmin
+    else:
+        dz_plot = clipped
 
-    ax.bar3d(xpos, ypos, zpos, dx, dy, clipped, color=colors, shade=True)
+    ax.bar3d(xpos, ypos, zpos, dx, dy, dz_plot, color=colors, shade=True)
     ax.set_xticks(np.arange(len(eta_values)) + 0.3)
     ax.set_yticks(np.arange(len(nbins_values)) + 0.3)
     ax.set_xticklabels([f"{eta:.2f}" for eta in eta_values])
@@ -66,7 +169,7 @@ def barplot3d(
     ax.set_ylabel("Histogram bins")
     ax.set_zlabel(title)
     ax.set_title(title)
-    ax.set_zlim(min(0.0, zmin), zmax)
+    ax.set_zlim(zmin if base_at_min else min(0.0, zmin), zmax)
     scalar_mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
     scalar_mappable.set_array([])
     plt.colorbar(scalar_mappable, ax=ax, shrink=0.7, pad=0.08)
@@ -83,8 +186,7 @@ def main() -> None:
     states = [str(state) for state in summary["states"]]
     runtimes = summary["runtime_seconds"]
     average_runtime = np.mean(runtimes, axis=2)
-    open4_alpha = summary["open4_alpha"]
-    closed1_pop = summary["closed1_single_photon_population"]
+    open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity = compute_fidelity_metrics(summary, states)
     runtime_vmin = float(np.nanmin(runtimes))
     runtime_vmax = float(np.nanmax(runtimes))
 
@@ -96,7 +198,7 @@ def main() -> None:
         nbins_values,
         eta_values,
         "Average runtime across the four tomographies [s]",
-        "magma",
+        "viridis",
         zmin=float(np.nanmin(average_runtime)),
         zmax=float(np.nanmax(average_runtime)),
     )
@@ -148,6 +250,27 @@ def main() -> None:
         zmax=2.0 * np.pi,
     )
     fig_metrics.suptitle("State metrics across the benchmark grid")
+
+    fig_fidelity, axes_fidelity = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True, subplot_kw={"projection": "3d"})
+    barplot3d(
+        axes_fidelity[0],
+        open4_fidelity,
+        nbins_values,
+        eta_values,
+        "Coherent-state fidelity",
+        "viridis",
+        base_at_min=True,
+    )
+    barplot3d(
+        axes_fidelity[1],
+        closed1_fidelity,
+        nbins_values,
+        eta_values,
+        "Single-photon-mixture fidelity",
+        "viridis",
+        base_at_min=True,
+    )
+    fig_fidelity.suptitle("Closest-state fidelities")
 
     plt.show()
 
