@@ -73,6 +73,23 @@ def single_photon_mixture_fidelity(rho: np.ndarray, p1: float) -> float:
     return float(qt.fidelity(rho_obj, target_dm))
 
 
+def spac_density_matrix(dim: int, alpha: complex) -> qt.Qobj:
+    coherent_ket = qt.coherent(dim, alpha)
+    spac_ket = qt.create(dim) * coherent_ket
+    norm = float(spac_ket.norm())
+    if norm <= 0.0:
+        return qt.ket2dm(coherent_ket)
+    return qt.ket2dm(spac_ket.unit())
+
+
+def spac_mixture_fidelity(rho: np.ndarray, alpha: complex, p1: float) -> float:
+    rho_obj = qt.Qobj(rho)
+    coherent_dm = qt.ket2dm(qt.coherent(rho.shape[0], alpha))
+    spac_dm = spac_density_matrix(rho.shape[0], alpha)
+    target_dm = (1.0 - p1) * coherent_dm + p1 * spac_dm
+    return float(qt.fidelity(rho_obj, target_dm))
+
+
 def find_closest_single_photon_mixture(rho: np.ndarray) -> tuple[float, float]:
     rho_obj = qt.Qobj(rho)
 
@@ -86,7 +103,10 @@ def find_closest_single_photon_mixture(rho: np.ndarray) -> tuple[float, float]:
     return p1_best, fidelity
 
 
-def compute_fidelity_metrics(summary, states: list[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def compute_fidelity_metrics(
+    summary,
+    states: list[str],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     nbins_values = summary["nbins_values"]
     eta_values = summary["eta_values"]
     result_files = summary["result_files"]
@@ -96,7 +116,9 @@ def compute_fidelity_metrics(summary, states: list[str]) -> tuple[np.ndarray, np
     open4_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
     closed1_pop = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
     closed1_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
+    open1_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
 
+    open1_idx = state_index.get("open1")
     open4_idx = state_index.get("open4")
     closed1_idx = state_index.get("closed1")
 
@@ -120,7 +142,19 @@ def compute_fidelity_metrics(summary, states: list[str]) -> tuple[np.ndarray, np
                     closed1_pop[i, j] = p1_best
                     closed1_fidelity[i, j] = fidelity
 
-    return open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity
+            if (
+                open1_idx is not None
+                and np.isfinite(closed1_pop[i, j])
+                and np.isfinite(open4_fidelity[i, j])
+                and not np.isnan(open4_alpha[i, j].real)
+            ):
+                open1_file = Path(str(result_files[i, j, open1_idx]))
+                if open1_file.exists():
+                    with np.load(open1_file, allow_pickle=False) as data:
+                        rho = np.array(data["rho"], copy=False)
+                    open1_fidelity[i, j] = spac_mixture_fidelity(rho, open4_alpha[i, j], closed1_pop[i, j])
+
+    return open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity, open1_fidelity
 
 
 def barplot3d(
@@ -133,7 +167,8 @@ def barplot3d(
     zmin=None,
     zmax=None,
     base_at_min: bool = False,
-) -> None:
+    add_colorbar: bool = True,
+):
     y_idx, x_idx = np.meshgrid(np.arange(len(nbins_values)), np.arange(len(eta_values)), indexing="ij")
     xpos = x_idx.ravel()
     ypos = y_idx.ravel()
@@ -172,7 +207,9 @@ def barplot3d(
     ax.set_zlim(zmin if base_at_min else min(0.0, zmin), zmax)
     scalar_mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
     scalar_mappable.set_array([])
-    plt.colorbar(scalar_mappable, ax=ax, shrink=0.7, pad=0.08)
+    if add_colorbar:
+        plt.colorbar(scalar_mappable, ax=ax, shrink=0.7, pad=0.08)
+    return scalar_mappable
 
 
 def main() -> None:
@@ -184,9 +221,12 @@ def main() -> None:
     nbins_values = summary["nbins_values"]
     eta_values = summary["eta_values"]
     states = [str(state) for state in summary["states"]]
-    runtimes = summary["runtime_seconds"]
+    runtimes = summary["runtime_seconds"] / 60.0
     average_runtime = np.mean(runtimes, axis=2)
-    open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity = compute_fidelity_metrics(summary, states)
+    open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity, open1_fidelity = compute_fidelity_metrics(
+        summary,
+        states,
+    )
     runtime_vmin = float(np.nanmin(runtimes))
     runtime_vmax = float(np.nanmax(runtimes))
 
@@ -197,7 +237,7 @@ def main() -> None:
         average_runtime,
         nbins_values,
         eta_values,
-        "Average runtime across the four tomographies [s]",
+        "Average runtime across the four tomographies [min]",
         "viridis",
         zmin=float(np.nanmin(average_runtime)),
         zmax=float(np.nanmax(average_runtime)),
@@ -213,7 +253,7 @@ def main() -> None:
             runtimes[:, :, idx],
             nbins_values,
             eta_values,
-            f"Runtime {STATE_LABELS.get(state_key, state_key)} [s]",
+            f"Runtime {STATE_LABELS.get(state_key, state_key)} [min]",
             "viridis",
             zmin=runtime_vmin,
             zmax=runtime_vmax,
@@ -229,7 +269,7 @@ def main() -> None:
         nbins_values,
         eta_values,
         "Single-photon population",
-        "cividis",
+        "viridis",
     )
     barplot3d(
         axes_metrics[1],
@@ -237,7 +277,7 @@ def main() -> None:
         nbins_values,
         eta_values,
         "Coherent-state |alpha|",
-        "plasma",
+        "viridis",
     )
     barplot3d(
         axes_metrics[2],
@@ -251,15 +291,28 @@ def main() -> None:
     )
     fig_metrics.suptitle("State metrics across the benchmark grid")
 
-    fig_fidelity, axes_fidelity = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True, subplot_kw={"projection": "3d"})
-    barplot3d(
+    fidelity_stack = np.concatenate(
+        [
+            open4_fidelity[np.isfinite(open4_fidelity)],
+            closed1_fidelity[np.isfinite(closed1_fidelity)],
+            open1_fidelity[np.isfinite(open1_fidelity)],
+        ]
+    )
+    fidelity_zmin = float(np.min(fidelity_stack))
+    fidelity_zmax = float(np.max(fidelity_stack))
+    fig_fidelity, axes_fidelity = plt.subplots(1, 3, figsize=(18, 6), constrained_layout=True, subplot_kw={"projection": "3d"})
+    colormap_fidelity = "autumn"
+    fidelity_mappable = barplot3d(
         axes_fidelity[0],
         open4_fidelity,
         nbins_values,
         eta_values,
         "Coherent-state fidelity",
-        "viridis",
+        colormap_fidelity,
+        zmin=fidelity_zmin,
+        zmax=fidelity_zmax,
         base_at_min=True,
+        add_colorbar=False,
     )
     barplot3d(
         axes_fidelity[1],
@@ -267,9 +320,25 @@ def main() -> None:
         nbins_values,
         eta_values,
         "Single-photon-mixture fidelity",
-        "viridis",
+        colormap_fidelity,
+        zmin=fidelity_zmin,
+        zmax=fidelity_zmax,
         base_at_min=True,
+        add_colorbar=False,
     )
+    barplot3d(
+        axes_fidelity[2],
+        open1_fidelity,
+        nbins_values,
+        eta_values,
+        "SPAC-mixture fidelity",
+        colormap_fidelity,
+        zmin=fidelity_zmin,
+        zmax=fidelity_zmax,
+        base_at_min=True,
+        add_colorbar=False,
+    )
+    fig_fidelity.colorbar(fidelity_mappable, ax=axes_fidelity, shrink=0.75, pad=0.05)
     fig_fidelity.suptitle("Closest-state fidelities")
 
     plt.show()
