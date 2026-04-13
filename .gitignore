@@ -2,3 +2,4 @@ __pycache__
 *.pyc
 TomoOutput/
 single_photon_calib/
+Performance_tests/output/
