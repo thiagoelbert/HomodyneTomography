@@ -71,6 +71,29 @@ HEARTBEAT_INTERVAL_SECONDS = 30.0
 RESUME_PREVIOUS_RUN = True
 
 
+def build_benchmark_config() -> dict:
+    return {
+        "data_folder": str(DATA_FOLDER),
+        "channel": CHANNEL,
+        "pulses": list(PULSES),
+        "shutters": list(SHUTTERS),
+        "state_order": list(STATE_ORDER),
+        "state_map": {key: {"shutter": value[0], "pulse": value[1], "label": value[2]} for key, value in STATE_MAP.items()},
+        "cutoff": CUTOFF,
+        "nbins_values": [None if value is None else int(value) for value in NBINS_VALUES],
+        "detection_efficiencies": [float(value) for value in DETECTION_EFFICIENCIES],
+        "tol": TOL,
+        "max_iter": MAX_ITER,
+        "min_prob": MIN_PROB,
+        "enable_phase_calibration": ENABLE_PHASE_CALIBRATION,
+        "alpha_fit_max_iter": ALPHA_FIT_MAX_ITER,
+        "alpha_search_max": float(ALPHA_SEARCH_MAX),
+        "heartbeat_interval_seconds": HEARTBEAT_INTERVAL_SECONDS,
+        "resume_previous_run": RESUME_PREVIOUS_RUN,
+        "output_dir": str(OUTPUT_DIR),
+    }
+
+
 def build_quadrature_dict(subset) -> Dict[float, np.ndarray]:
     quadratures: Dict[float, np.ndarray] = {}
     if subset.empty:
@@ -373,6 +396,7 @@ def save_summary_snapshot(
     csv_rows: list[dict],
     sweep_complete: bool,
 ) -> None:
+    benchmark_config = build_benchmark_config()
     tmp_npz = output_dir / "benchmark_summary.tmp.npz"
     final_npz = output_dir / "benchmark_summary.npz"
     np.savez(
@@ -391,6 +415,7 @@ def save_summary_snapshot(
         reconstruction_time_seconds=reconstruction_elapsed,
         data_folder=str(data_folder),
         calibrated_folder=str(calib_folder),
+        benchmark_config_json=json.dumps(benchmark_config),
         result_files=result_files,
         sweep_complete=sweep_complete,
     )
@@ -456,13 +481,11 @@ def main() -> None:
             run_dir.mkdir(parents=True, exist_ok=True)
 
             metadata = {
+                **build_benchmark_config(),
                 "data_folder": str(DATA_FOLDER),
                 "calibrated_folder": str(calib_folder),
-                "channel": CHANNEL,
-                "cutoff": CUTOFF,
                 "nbins": nbins_value,
                 "eta": float(eta),
-                "state_order": list(STATE_ORDER),
             }
             (run_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 

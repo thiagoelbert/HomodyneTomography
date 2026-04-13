@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -13,6 +14,10 @@ import qutip as qt
 from scipy.optimize import minimize, minimize_scalar
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from Reconstruction_core.mle_lvovsky import apply_loss_map
 
 
 SUMMARY_FILE = ROOT / "Performance_tests" / "output" / "benchmark_summary.npz"
@@ -73,6 +78,19 @@ def single_photon_mixture_fidelity(rho: np.ndarray, p1: float) -> float:
     return float(qt.fidelity(rho_obj, target_dm))
 
 
+def find_closest_single_photon_mixture(rho: np.ndarray) -> tuple[float, float]:
+    rho_obj = qt.Qobj(rho)
+
+    def objective(p1: float) -> float:
+        target_dm = single_photon_mixture_density_matrix(rho.shape[0], p1)
+        return -float(qt.fidelity(rho_obj, target_dm))
+
+    res = minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded")
+    p1_best = float(np.clip(res.x, 0.0, 1.0))
+    fidelity = single_photon_mixture_fidelity(rho, p1_best)
+    return p1_best, fidelity
+
+
 def spac_density_matrix(dim: int, alpha: complex) -> qt.Qobj:
     coherent_ket = qt.coherent(dim, alpha)
     spac_ket = qt.create(dim) * coherent_ket
@@ -90,23 +108,31 @@ def spac_mixture_fidelity(rho: np.ndarray, alpha: complex, p1: float) -> float:
     return float(qt.fidelity(rho_obj, target_dm))
 
 
-def find_closest_single_photon_mixture(rho: np.ndarray) -> tuple[float, float]:
-    rho_obj = qt.Qobj(rho)
-
-    def objective(p1: float) -> float:
-        target_dm = single_photon_mixture_density_matrix(rho.shape[0], p1)
-        return -float(qt.fidelity(rho_obj, target_dm))
-
-    res = minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded")
-    p1_best = float(np.clip(res.x, 0.0, 1.0))
-    fidelity = single_photon_mixture_fidelity(rho, p1_best)
-    return p1_best, fidelity
+def estimate_eta_from_single_photon(rho: np.ndarray) -> float:
+    if rho.shape[0] < 2:
+        return 0.0
+    return float(np.clip(np.real(rho[1, 1]), 0.0, 1.0))
 
 
-def compute_fidelity_metrics(
-    summary,
-    states: list[str],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def loss_applied_spacs_density_matrix(dim: int, alpha: complex, eta: float) -> qt.Qobj:
+    spacs_dm = np.asarray(spac_density_matrix(dim, alpha).full(), dtype=np.complex128)
+    return qt.Qobj(apply_loss_map(spacs_dm, eta))
+
+
+def spacs_loss_model_fidelity(
+    rho_spacs_rec: np.ndarray,
+    eta: float,
+    alpha_out: complex,
+) -> tuple[complex, float]:
+    eta_clipped = float(np.clip(eta, 1e-9, 1.0))
+    alpha_in = alpha_out / np.sqrt(eta_clipped)
+    rho_obj = qt.Qobj(rho_spacs_rec)
+    rho_spacs_loss = loss_applied_spacs_density_matrix(rho_spacs_rec.shape[0], alpha_in, eta_clipped)
+    model_fidelity = float(qt.fidelity(rho_obj, rho_spacs_loss))
+    return alpha_in, model_fidelity
+
+
+def compute_fidelity_metrics(summary, states: list[str]) -> dict[str, np.ndarray]:
     nbins_values = summary["nbins_values"]
     eta_values = summary["eta_values"]
     result_files = summary["result_files"]
@@ -116,7 +142,10 @@ def compute_fidelity_metrics(
     open4_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
     closed1_pop = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
     closed1_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
-    open1_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
+    open1_reference_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
+    open1_model_alpha = np.full((len(nbins_values), len(eta_values)), np.nan + 1j * np.nan, dtype=np.complex128)
+    open1_model_eta = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
+    open1_model_fidelity = np.full((len(nbins_values), len(eta_values)), np.nan, dtype=float)
 
     open1_idx = state_index.get("open1")
     open4_idx = state_index.get("open4")
@@ -124,12 +153,15 @@ def compute_fidelity_metrics(
 
     for i in range(len(nbins_values)):
         for j in range(len(eta_values)):
+            rho_open4 = None
+            rho_closed1 = None
+
             if open4_idx is not None:
                 open4_file = Path(str(result_files[i, j, open4_idx]))
                 if open4_file.exists():
                     with np.load(open4_file, allow_pickle=False) as data:
-                        rho = np.array(data["rho"], copy=False)
-                    alpha_fit, fidelity = find_closest_coherent_state(rho)
+                        rho_open4 = np.array(data["rho"], copy=False)
+                    alpha_fit, fidelity = find_closest_coherent_state(rho_open4)
                     open4_alpha[i, j] = alpha_fit
                     open4_fidelity[i, j] = fidelity
 
@@ -137,24 +169,46 @@ def compute_fidelity_metrics(
                 closed1_file = Path(str(result_files[i, j, closed1_idx]))
                 if closed1_file.exists():
                     with np.load(closed1_file, allow_pickle=False) as data:
-                        rho = np.array(data["rho"], copy=False)
-                    p1_best, fidelity = find_closest_single_photon_mixture(rho)
+                        rho_closed1 = np.array(data["rho"], copy=False)
+                    p1_best, fidelity = find_closest_single_photon_mixture(rho_closed1)
                     closed1_pop[i, j] = p1_best
                     closed1_fidelity[i, j] = fidelity
 
-            if (
-                open1_idx is not None
-                and np.isfinite(closed1_pop[i, j])
-                and np.isfinite(open4_fidelity[i, j])
-                and not np.isnan(open4_alpha[i, j].real)
-            ):
+            if open1_idx is not None and rho_open4 is not None and not np.isnan(open4_alpha[i, j].real):
                 open1_file = Path(str(result_files[i, j, open1_idx]))
                 if open1_file.exists():
                     with np.load(open1_file, allow_pickle=False) as data:
-                        rho = np.array(data["rho"], copy=False)
-                    open1_fidelity[i, j] = spac_mixture_fidelity(rho, open4_alpha[i, j], closed1_pop[i, j])
+                        rho_open1 = np.array(data["rho"], copy=False)
 
-    return open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity, open1_fidelity
+                    if np.isfinite(closed1_pop[i, j]):
+                        open1_reference_fidelity[i, j] = spac_mixture_fidelity(
+                            rho_open1,
+                            open4_alpha[i, j],
+                            closed1_pop[i, j],
+                        )
+
+                    if rho_closed1 is not None:
+                        eta_model = estimate_eta_from_single_photon(rho_closed1)
+                        (
+                            open1_model_alpha[i, j],
+                            open1_model_fidelity[i, j],
+                        ) = spacs_loss_model_fidelity(
+                            rho_open1,
+                            eta_model,
+                            open4_alpha[i, j],
+                        )
+                        open1_model_eta[i, j] = eta_model
+
+    return {
+        "open4_alpha": open4_alpha,
+        "open4_fidelity": open4_fidelity,
+        "closed1_pop": closed1_pop,
+        "closed1_fidelity": closed1_fidelity,
+        "open1_reference_fidelity": open1_reference_fidelity,
+        "open1_model_alpha": open1_model_alpha,
+        "open1_model_eta": open1_model_eta,
+        "open1_model_fidelity": open1_model_fidelity,
+    }
 
 
 def barplot3d(
@@ -223,10 +277,17 @@ def main() -> None:
     states = [str(state) for state in summary["states"]]
     runtimes = summary["runtime_seconds"] / 60.0
     average_runtime = np.mean(runtimes, axis=2)
-    open4_alpha, open4_fidelity, closed1_pop, closed1_fidelity, open1_fidelity = compute_fidelity_metrics(
-        summary,
-        states,
-    )
+
+    fidelity_metrics = compute_fidelity_metrics(summary, states)
+    open4_alpha = fidelity_metrics["open4_alpha"]
+    open4_fidelity = fidelity_metrics["open4_fidelity"]
+    closed1_pop = fidelity_metrics["closed1_pop"]
+    closed1_fidelity = fidelity_metrics["closed1_fidelity"]
+    open1_reference_fidelity = fidelity_metrics["open1_reference_fidelity"]
+    open1_model_alpha = fidelity_metrics["open1_model_alpha"]
+    open1_model_eta = fidelity_metrics["open1_model_eta"]
+    open1_model_fidelity = fidelity_metrics["open1_model_fidelity"]
+
     runtime_vmin = float(np.nanmin(runtimes))
     runtime_vmax = float(np.nanmax(runtimes))
 
@@ -276,7 +337,7 @@ def main() -> None:
         alpha_abs,
         nbins_values,
         eta_values,
-        "Coherent-state |alpha|",
+        "Coherent-state |alpha_out|",
         "viridis",
     )
     barplot3d(
@@ -284,7 +345,7 @@ def main() -> None:
         alpha_phase,
         nbins_values,
         eta_values,
-        "Coherent-state arg(alpha) [rad]",
+        "Coherent-state arg(alpha_out) [rad]",
         "twilight",
         zmin=0.0,
         zmax=2.0 * np.pi,
@@ -295,13 +356,14 @@ def main() -> None:
         [
             open4_fidelity[np.isfinite(open4_fidelity)],
             closed1_fidelity[np.isfinite(closed1_fidelity)],
-            open1_fidelity[np.isfinite(open1_fidelity)],
+            open1_reference_fidelity[np.isfinite(open1_reference_fidelity)],
+            open1_model_fidelity[np.isfinite(open1_model_fidelity)],
         ]
     )
     fidelity_zmin = float(np.min(fidelity_stack))
     fidelity_zmax = float(np.max(fidelity_stack))
-    fig_fidelity, axes_fidelity = plt.subplots(1, 3, figsize=(18, 6), constrained_layout=True, subplot_kw={"projection": "3d"})
     colormap_fidelity = "autumn"
+    fig_fidelity, axes_fidelity = plt.subplots(1, 4, figsize=(24, 6), constrained_layout=True, subplot_kw={"projection": "3d"})
     fidelity_mappable = barplot3d(
         axes_fidelity[0],
         open4_fidelity,
@@ -328,7 +390,7 @@ def main() -> None:
     )
     barplot3d(
         axes_fidelity[2],
-        open1_fidelity,
+        open1_reference_fidelity,
         nbins_values,
         eta_values,
         "SPAC-mixture fidelity",
@@ -338,8 +400,50 @@ def main() -> None:
         base_at_min=True,
         add_colorbar=False,
     )
+    barplot3d(
+        axes_fidelity[3],
+        open1_model_fidelity,
+        nbins_values,
+        eta_values,
+        "SPACS loss-model fidelity",
+        colormap_fidelity,
+        zmin=fidelity_zmin,
+        zmax=fidelity_zmax,
+        base_at_min=True,
+        add_colorbar=False,
+    )
     fig_fidelity.colorbar(fidelity_mappable, ax=axes_fidelity, shrink=0.75, pad=0.05)
-    fig_fidelity.suptitle("Closest-state fidelities")
+    fig_fidelity.suptitle("Fidelity Benchmarks")
+
+    fig_spac_fit, axes_spac_fit = plt.subplots(1, 3, figsize=(18, 6), constrained_layout=True, subplot_kw={"projection": "3d"})
+    barplot3d(
+        axes_spac_fit[0],
+        open1_model_eta,
+        nbins_values,
+        eta_values,
+        "Fixed eta from single-photon tomography",
+        "viridis",
+        base_at_min=True,
+    )
+    barplot3d(
+        axes_spac_fit[1],
+        np.abs(open1_model_alpha),
+        nbins_values,
+        eta_values,
+        "Recovered input |alpha|",
+        "plasma",
+    )
+    barplot3d(
+        axes_spac_fit[2],
+        np.mod(np.angle(open1_model_alpha), 2.0 * np.pi),
+        nbins_values,
+        eta_values,
+        "Recovered input arg(alpha) [rad]",
+        "twilight",
+        zmin=0.0,
+        zmax=2.0 * np.pi,
+    )
+    fig_spac_fit.suptitle("SPACS Loss Model Inputs")
 
     plt.show()
 
