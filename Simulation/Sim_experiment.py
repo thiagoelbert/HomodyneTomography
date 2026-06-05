@@ -24,8 +24,8 @@ SAMPLES_PER_PHASE = 8000
 SHUTTERS: Iterable[str] = ("open", "closed")
 VAC_STD = 1 / np.sqrt(2)  # calibrated vacuum std matching reconstruction convention
 # Coherent amplitude used for the open shots (can be complex)
-ALPHA = .0 + 0.0j
-EFFICIENCY = 1
+ALPHA = -0.4 - 0j
+EFFICIENCY = 0.95
 RNG = np.random.default_rng(42)
 
 
@@ -61,18 +61,20 @@ def sample_coherent(alpha: complex, phase: float, size: int) -> np.ndarray:
     return RNG.normal(loc=mean, scale=VAC_STD, size=size)
 
 
-def spac_quadratures_pdf(x: np.ndarray, alpha: float, theta: float, eta: float) -> np.ndarray:
+def spac_quadratures_pdf(x: np.ndarray, alpha: complex, eta: float) -> np.ndarray:
     """Single-photon-added coherent state quadrature PDF with efficiency eta."""
-    c = np.sqrt(1 / np.pi) / (1 + np.abs(alpha) ** 2)
+    alpha_abs = np.abs(alpha)
+    theta = np.angle(alpha)
+    c = np.sqrt(1 / np.pi) / (1 + alpha_abs ** 2)
     m = (
         1
         - eta
         + 2 * eta * x ** 2
-        + np.abs(alpha) ** 2 * (1 + 2 * eta * (eta - 1))
-        - 2 * np.sqrt(2) * np.abs(alpha) * x * np.sqrt(eta) * (2 * eta - 1) * np.cos(theta)
-        + 2 * np.abs(alpha) ** 2 * eta * (eta - 1) * np.cos(2 * theta)
+        + alpha_abs ** 2 * (1 + 2 * eta * (eta - 1))
+        - 2 * np.sqrt(2) * alpha_abs * x * np.sqrt(eta) * (2 * eta - 1) * np.cos(theta)
+        + 2 * alpha_abs ** 2 * eta * (eta - 1) * np.cos(2 * theta)
     )
-    e = np.exp(-1 * (x - np.sqrt(2 * eta) * np.abs(alpha) * np.cos(theta)) ** 2)
+    e = np.exp(-1 * (x - np.sqrt(2 * eta) * alpha_abs * np.cos(theta)) ** 2)
     return c * m * e
 
 
@@ -102,7 +104,8 @@ def sample_photon_added_coherent(alpha: complex, phase: float, size: int) -> np.
     span = 5
     grid = np.linspace(x0-span, x0+span, 2001)
 
-    pdf = spac_quadratures_pdf(grid, alpha, phase, eta=EFFICIENCY)
+    # Use the rotated amplitude directly; the relative phase is arg(alpha_rot).
+    pdf = spac_quadratures_pdf(grid, alpha_rot, eta=EFFICIENCY)
     pdf /= np.trapezoid(pdf, grid)
     return draw_from_pdf(pdf, grid, size)
 
